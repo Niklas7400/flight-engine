@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from services.flight_api import get_flights
 from services.scoring import get_best_flight
 from services.decision import make_decision
+from services.simulation import simulate_dates
 
 app = FastAPI()
 
@@ -20,9 +21,12 @@ def search(origin: str, destination: str, date: str):
 
     decision_data = make_decision(best["price"], flights)
 
+    simulations = simulate_dates(origin, destination, date)
+
     return {
         "best_flight": best,
         "score": score,
         "decision": decision_data,
-        "all_flights": flights
+        "all_flights": flights,
+        "simulations": simulations
     }
