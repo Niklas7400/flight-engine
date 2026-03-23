@@ -39,7 +39,29 @@ def get_flights(origin, destination, date):
         stops = max(len(segments) - 1, 0)
 
         # ⏱ Dauer berechnen (simple)
-        duration = len(segments) * 3  # placeholder
+        duration_raw = flight.get("total_duration", 0)
+
+        # ✅ FALL 1: int (z.B. 850 Minuten)
+        if isinstance(duration_raw, int):
+            duration = duration_raw / 60  # Minuten → Stunden
+
+        # ✅ FALL 2: string ("12h 30m")
+        elif isinstance(duration_raw, str):
+            hours = 0
+            minutes = 0
+
+            if "h" in duration_raw:
+                parts = duration_raw.split("h")
+                hours = int(parts[0].strip())
+
+                if len(parts) > 1 and "m" in parts[1]:
+                    minutes = int(parts[1].replace("m", "").strip())
+
+            duration = hours + minutes / 60
+
+        # ❌ fallback
+        else:
+            duration = 0
 
         # 👉 NUR gültige Flüge hinzufügen
         if price > 0:
