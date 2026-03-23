@@ -36,6 +36,9 @@ def get_flights(origin, destination, date):
         # 🛫 Segmente holen
         segments = flight.get("flights", [])
 
+        if not segments:
+            continue
+
         stops = max(len(segments) - 1, 0)
 
         # ⏱ Dauer berechnen (simple)
@@ -65,10 +68,34 @@ def get_flights(origin, destination, date):
 
         # 👉 NUR gültige Flüge hinzufügen
         if price > 0:
+            first_segment = segments[0] if segments else {}
+            last_segment = segments[-1] if segments else {}
+
+            airline = first_segment.get("airline", "Unknown")
+
+            departure_time = first_segment.get("departure_airport", {}).get("time", "")
+            arrival_time = last_segment.get("arrival_airport", {}).get("time", "")
+
+            # Route bauen
+            route_airports = [
+                seg.get("departure_airport", {}).get("id", "")
+                for seg in segments
+            ]
+            route_airports.append(
+                last_segment.get("arrival_airport", {}).get("id", "")
+            )
+
+            route = " → ".join(route_airports)
+
             flights.append({
                 "price": price,
                 "duration": duration,
-                "stops": stops
+                "stops": stops,
+                "airline": airline,
+                "departure": departure_time.split(" ")[1] if departure_time else "",
+                "arrival": arrival_time.split(" ")[1] if arrival_time else "",
+                "route": route,
+                "booking_token": flight.get("booking_token")
             })
     print("Parsed flights:", flights)
     return flights
