@@ -13,6 +13,7 @@ def get_flights(origin, destination, date):
         "currency": "EUR",
         "hl": "en",
         "type": 2,
+        "max": 20,
         "api_key": os.getenv("SERPAPI_KEY")
     }
 
@@ -23,8 +24,12 @@ def get_flights(origin, destination, date):
     flights = []
 
     best_flights = results.get("best_flights", [])
+    other_flights = results.get("other_flights", [])
 
-    for flight in best_flights:
+    #🔥 combine both
+    all_flights_raw = best_flights + other_flights
+
+    for flight in all_flights_raw:
         raw_price = flight.get("price", 0)
 
         # 💰 Preis sauber machen
@@ -97,5 +102,6 @@ def get_flights(origin, destination, date):
                 "route": route,
                 "booking_token": flight.get("booking_token")
             })
-    print("Parsed flights:", flights)
+
+    flights = sorted(flights, key=lambda x: x["price"])
     return flights

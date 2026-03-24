@@ -1,13 +1,13 @@
 def score_flight(flight):
     score = 0
 
-    # Preis (je günstiger desto besser)
-    score += (1000 - flight["price"]) * 0.5
+    # 💰 Preis (wichtigster Faktor)
+    score += (1000 - flight["price"]) * 0.6
 
-    # Dauer (kürzer = besser)
-    score += (20 - flight["duration"]) * 10
+    # ⏱ Dauer (weniger wichtig als Preis)
+    score -= flight["duration"] * 5
 
-    # Stops (weniger = besser)
+    # 🛑 Stops (wichtig für Komfort)
     score -= flight["stops"] * 50
 
     return score

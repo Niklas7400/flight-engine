@@ -13,8 +13,21 @@ def root():
 @app.get("/search")
 def search(origin: str, destination: str, date: str):
     flights = get_flights(origin, destination, date)
+
+    if not flights:
+        return {"error": "no flights found"}
+
     
     best, score = get_best_flight(flights)
+
+    print("\n" + "="*40)
+    print("ALL PRICES")
+    print("="*40)
+
+    for f in flights:
+        print(f["price"])
+
+    cheapest = min(flights, key=lambda x: x["price"])
 
     if best is None:
         return {"error": "no best flight found"}
@@ -25,6 +38,7 @@ def search(origin: str, destination: str, date: str):
 
     return {
         "best_flight": best,
+        "cheapest_flight": cheapest,
         "score": score,
         "decision": decision_data,
         "all_flights": flights,
