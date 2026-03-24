@@ -1,15 +1,15 @@
 from serpapi import GoogleSearch
 import os
 from dotenv import load_dotenv
+from services.airports import resolve_airports
 
 load_dotenv()
 
 def get_flights(origin, destination, date):
 
-    # 👉 NEU: mehrere Airports sauber machen
-    origin = ",".join([o.strip().upper() for o in origin.split(",")])
-    destination = ",".join([d.strip().upper() for d in destination.split(",")])
-    
+    origin = resolve_airports(origin)
+    destination = resolve_airports(destination)
+
     params = {
         "engine": "google_flights",
         "departure_id": origin,
