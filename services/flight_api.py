@@ -19,7 +19,30 @@ def get_flights(origin, destination, date):
 
     search = GoogleSearch(params)
     results = search.get_dict()
-    print("FULL RESULTS:", results)
+    print("\n" + "="*60)
+    print("RAW API FLIGHTS CHECK")
+    print("="*60)
+
+    all_raw = results.get("best_flights", []) + results.get("other_flights", [])
+
+    for flight in all_raw:
+        price = flight.get("price")
+
+        segments = flight.get("flights", [])
+        if not segments:
+            continue
+
+        first = segments[0]
+        last = segments[-1]
+
+        airline = first.get("airline", "Unknown")
+
+        route = " → ".join(
+            [seg.get("departure_airport", {}).get("id", "") for seg in segments] +
+            [last.get("arrival_airport", {}).get("id", "")]
+        )
+
+        print(f"{price}€ | {airline} | {route}")
 
     flights = []
 

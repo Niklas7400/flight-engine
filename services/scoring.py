@@ -7,8 +7,15 @@ def score_flight(flight):
     # ⏱ Dauer (weniger wichtig als Preis)
     score -= flight["duration"] * 5
 
+    # Extra penalty für sehr lange Flüge (weich!)
+    score -= max(0, (flight["duration"] - 15)) * 8
+
     # 🛑 Stops (wichtig für Komfort)
     score -= flight["stops"] * 50
+
+    # 🟢 Direktflug Bonus
+    if flight["stops"] == 0:
+        score += 100
 
     return score
 
