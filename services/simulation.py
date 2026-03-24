@@ -14,7 +14,7 @@ def simulate_dates(origin, destination, base_date):
         new_date = base + timedelta(days=offset)
         new_date_str = new_date.strftime("%Y-%m-%d")
 
-        flights = get_flights(origin, destination, new_date_str)
+        flights, _ = get_flights(origin, destination, new_date_str)
 
         if not flights:
             continue

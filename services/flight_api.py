@@ -24,9 +24,9 @@ def get_flights(origin, destination, date):
 
     search = GoogleSearch(params)
     results = search.get_dict()
-    print("\n" + "="*60)
-    print("RAW API FLIGHTS CHECK")
-    print("="*60)
+
+    price_insights = results.get("price_insights", {})
+    price_history = price_insights.get("price_history", [])
 
     all_raw = results.get("best_flights", []) + results.get("other_flights", [])
 
@@ -132,4 +132,4 @@ def get_flights(origin, destination, date):
             })
 
     flights = sorted(flights, key=lambda x: x["price"])
-    return flights
+    return flights, price_history
