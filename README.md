@@ -1,58 +1,86 @@
 # Flight Engine
 
-Flight search & buy-or-wait decision engine built with Python / FastAPI.
+Kleine FastAPI-Anwendung für die Flugsuche mit einer Kauf-oder-Warte-Einschätzung. Die Flugdaten kommen von [SerpApi (Google Flights)](https://serpapi.com/google-flights-api).
 
-It searches flights via [SerpApi's Google Flights engine](https://serpapi.com/google-flights-api), scores them by price, duration and stops, and combines current market prices with historical price data to recommend whether to **buy now** or **wait**.
+> **Status: Prototyp.** Das Projekt ist als Wochenendprojekt entstanden. Die Empfehlung ist eine einfache Heuristik und keine validierte Preisprognose, siehe [Status und Grenzen](#status-und-grenzen).
 
-## Features
+## Was es tut
 
-- Multi-airport and city-based origin/destination resolution (e.g. `london` → `LHR,LGW,STN,LTN`)
-- One-way and round-trip search
-- Flight scoring based on price, duration and number of stops
-- Buy-or-wait decision engine combining market and historical price analysis with an explainable reason
-- Nearby-date price simulation (±2 days) to spot cheaper alternatives
-
-## Requirements
-
-- Python 3.10+
-- A [SerpApi](https://serpapi.com/) API key
+- Flugsuche für One-Way und Round-Trip
+- Städtenamen werden zu mehreren Flughäfen aufgelöst (z. B. `london` → `LHR,LGW,STN,LTN`, siehe `services/airports.py`)
+- Bewertung der Flüge nach Preis, Dauer und Anzahl Stopps
+- Einschätzung `BUY` / `GOOD` / `OK` / `WAIT` mit kurzer Begründung
+- Preise für die Nachbartage (±1 und ±2 Tage) zum Vergleich
 
 ## Setup
+
+Voraussetzungen: Python 3.10+ und ein [SerpApi-Key](https://serpapi.com/manage-api-key).
 
 ```bash
 python -m venv venv
 source venv/bin/activate
-pip install fastapi uvicorn python-dotenv "serpapi"
+pip install -r requirements.txt        # zum Testen: requirements-dev.txt
+cp .env.example .env                   # dann SERPAPI_KEY in .env eintragen
+uvicorn main:app --reload
 ```
 
-Create a `.env` file in the project root:
+Hinweis: Benötigt wird das Paket `google-search-results` (importiert als `serpapi`), nicht das Paket `serpapi`.
 
-```
-SERPAPI_KEY=your_serpapi_key
-```
-
-## Running
+Tests (SerpApi wird gemockt, kein Key nötig):
 
 ```bash
-uvicorn main:app --reload
+pip install -r requirements-dev.txt
+pytest
 ```
 
 ## API
 
 ### `GET /search`
 
-| Parameter        | Type   | Required | Description                                  |
-|-------------------|--------|----------|------------------------------------------------|
-| `origin`          | string | yes      | Origin airport/city code(s)                   |
-| `destination`     | string | yes      | Destination airport/city code(s)               |
-| `departure_date`  | string | yes      | Departure date (`YYYY-MM-DD`)                  |
-| `return_date`     | string | no       | Return date (`YYYY-MM-DD`), required if `trip_type=roundtrip` |
-| `trip_type`       | string | no       | `oneway` (default) or `roundtrip`              |
-
-Example:
+| Parameter        | Typ    | Pflicht | Beschreibung                                            |
+|------------------|--------|---------|---------------------------------------------------------|
+| `origin`         | string | ja      | Abflug: IATA-Code(s) oder bekannte Stadt, kommagetrennt |
+| `destination`    | string | ja      | Ziel, wie `origin`                                      |
+| `departure_date` | string | ja      | `YYYY-MM-DD`, nicht in der Vergangenheit                |
+| `return_date`    | string | bei `roundtrip` | `YYYY-MM-DD`, nicht vor `departure_date`        |
+| `trip_type`      | enum   | nein    | `oneway` (Standard) oder `roundtrip`                    |
 
 ```bash
-curl "http://localhost:8000/search?origin=frankfurt&destination=london&departure_date=2026-07-10"
+curl "http://localhost:8000/search?origin=frankfurt&destination=london&departure_date=2026-12-10"
 ```
 
-Response includes the best flight, cheapest flight, scoring details, buy-or-wait decision, all matching flights, and nearby-date price simulations.
+Die Antwort enthält `best_flight`, `cheapest_flight`, `score`, `decision`, `all_flights` und `simulations`.
+
+Fehlercodes: `400` ungültige Eingabe (Datum, Flughafen, fehlendes `return_date`), `404` keine Flüge gefunden, `422` ungültiger `trip_type`, `502` SerpApi nicht erreichbar oder meldet einen Fehler, `503` `SERPAPI_KEY` nicht gesetzt.
+
+## Projektstruktur
+
+```
+main.py                  FastAPI-App, Eingabevalidierung, Fehlerbehandlung
+services/airports.py     Städte → Flughafencodes
+services/flight_api.py   SerpApi-Aufruf und Parsing der Flüge
+services/scoring.py      Bewertung einzelner Flüge
+services/decision.py     Kauf-oder-Warte-Heuristik
+services/simulation.py   Preise für Nachbartage
+tests/                   pytest-Tests (SerpApi gemockt)
+```
+
+## Status und Grenzen
+
+**Wie die Empfehlung berechnet wird** (`services/decision.py`):
+
+1. *Marktvergleich:* Der Preis des „besten“ Flugs (höchster Score aus Preis, Dauer, Stopps, nicht unbedingt der billigste) wird mit dem Durchschnitt der günstigsten ca. 30 % der aktuell gefundenen Flüge verglichen. Bei weniger als 4 Flügen ist die Basis der Durchschnitt aller Flüge.
+2. *Historischer Vergleich:* Falls SerpApi `price_insights.price_history` mitliefert, wird der Preis mit dem Durchschnitt dieser Historie verglichen. Fehlt sie, zählt dieser Teil als 0.
+3. Beide Abweichungen (in %) werden 60 / 40 gewichtet. Feste Schwellen (>15 `BUY`, >5 `GOOD`, >−5 `OK`, sonst `WAIT`) ergeben die Empfehlung.
+
+Die Gewichte und Schwellen sind von Hand gewählt und nicht an echten Daten kalibriert oder getestet. Zufallswerte werden nicht verwendet.
+
+**Was das NICHT leistet:**
+
+- Es ist **keine Prognose**. `WAIT` bedeutet nur „aktuell teurer als der Vergleichswert“, nicht „der Preis wird sinken“.
+- Es gibt **keine Garantie**, dass ein Preis günstiger oder teurer wird.
+- Die Preishistorie stammt von Google Flights über SerpApi und ist nur so aussagekräftig wie diese; sie liegt nicht immer vor und ist nicht auf den einzelnen Flug bezogen.
+- Die Nachbartag-„Simulation“ sind echte zusätzliche Abfragen, keine Modellierung.
+- Die Round-Trip-Auswertung wurde nur mit nachgebauten Beispielantworten getestet, nicht gegen die echte API. Die Aufteilung in Hin- und Rückflug ist eine Annahme über das Antwortformat.
+
+**Abhängigkeit von SerpApi:** Ohne Key und Kontingent funktioniert nichts. Jede Suche löst **5 SerpApi-Abfragen** aus (1 Hauptsuche + 4 Nachbartage), was das SerpApi-Kontingent schnell aufbrauchen kann. Preise werden in EUR abgefragt; Verfügbarkeit und Genauigkeit der Daten liegen bei SerpApi bzw. Google Flights.
