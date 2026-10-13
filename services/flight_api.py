@@ -1,9 +1,26 @@
-from serpapi import GoogleSearch
+import logging
 import os
+
 from dotenv import load_dotenv
+from serpapi import GoogleSearch
+
 from services.airports import resolve_airports
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
+
+
+class MissingApiKeyError(Exception):
+    """SERPAPI_KEY ist nicht gesetzt."""
+
+
+class UpstreamError(Exception):
+    """SerpApi ist nicht erreichbar oder hat einen Fehler gemeldet."""
+
+
+class NoFlightsError(Exception):
+    """SerpApi hat fuer die Suche keine Ergebnisse."""
 
 
 def get_flights(origin, destination, departure_date, return_date=None, trip_type="oneway"):
@@ -11,6 +28,12 @@ def get_flights(origin, destination, departure_date, return_date=None, trip_type
     # 🔍 Multi-Airport Support
     origin = resolve_airports(origin)
     destination = resolve_airports(destination)
+    origin_codes = set(origin.split(","))
+    destination_codes = set(destination.split(","))
+
+    api_key = os.getenv("SERPAPI_KEY")
+    if not api_key:
+        raise MissingApiKeyError("SERPAPI_KEY is not set")
 
     # ⚙️ Params
     params = {
@@ -20,7 +43,7 @@ def get_flights(origin, destination, departure_date, return_date=None, trip_type
         "outbound_date": departure_date,
         "currency": "EUR",
         "hl": "en",
-        "api_key": os.getenv("SERPAPI_KEY")
+        "api_key": api_key
     }
 
     # ✈️ Trip Type
@@ -33,8 +56,22 @@ def get_flights(origin, destination, departure_date, return_date=None, trip_type
         params["type"] = 2
 
     # 🔎 API Call
-    search = GoogleSearch(params)
-    results = search.get_dict()
+    try:
+        results = GoogleSearch(params).get_dict()
+    except Exception as exc:
+        # Die Exception-Message kann die URL inkl. api_key enthalten -> nicht weiterreichen.
+        logger.error("SerpApi request failed: %s", type(exc).__name__)
+        raise UpstreamError("SerpApi request failed") from None
+
+    if not isinstance(results, dict):
+        raise UpstreamError("Unexpected response from SerpApi")
+
+    error = results.get("error")
+    if error:
+        if "hasn't returned any results" in str(error):
+            raise NoFlightsError(str(error))
+        logger.error("SerpApi returned an error: %s", error)
+        raise UpstreamError("SerpApi returned an error")
 
     # 📉 Price History
     price_history = results.get("price_insights", {}).get("price_history", [])
@@ -44,8 +81,7 @@ def get_flights(origin, destination, departure_date, return_date=None, trip_type
     other_flights = results.get("other_flights", [])
     all_flights_raw = best_flights + other_flights
 
-    print("\n========== RAW FLIGHTS ==========")
-    print("Best:", len(best_flights), "| Other:", len(other_flights))
+    logger.debug("raw flights: best=%d other=%d", len(best_flights), len(other_flights))
 
     flights = []
     is_roundtrip = trip_type == "roundtrip"
@@ -54,10 +90,13 @@ def get_flights(origin, destination, departure_date, return_date=None, trip_type
         raw_price = flight.get("price", 0)
 
         # 💰 Preis
-        if isinstance(raw_price, str):
-            price = float(raw_price.replace("$", "").replace(",", ""))
-        else:
-            price = float(raw_price)
+        try:
+            if isinstance(raw_price, str):
+                price = float(raw_price.replace("$", "").replace(",", ""))
+            else:
+                price = float(raw_price)
+        except (TypeError, ValueError):
+            continue
 
         if price <= 0:
             continue
@@ -107,8 +146,6 @@ def get_flights(origin, destination, departure_date, return_date=None, trip_type
 
             route = " → ".join(route_airports)
 
-            print(f"{price}€ | {airline} | {route}")
-
             flights.append({
                 "price": price,
                 "duration": duration,
@@ -137,9 +174,9 @@ def get_flights(origin, destination, departure_date, return_date=None, trip_type
                 dep = seg.get("departure_airport", {}).get("id", "")
                 arr = seg.get("arrival_airport", {}).get("id", "")
 
-                if dep == origin or arr == destination:
+                if dep in origin_codes or arr in destination_codes:
                     outbound_segments.append(seg)
-                elif dep == destination or arr == origin:
+                elif dep in destination_codes or arr in origin_codes:
                     return_segments.append(seg)
 
             # ✅ echter roundtrip
@@ -171,8 +208,6 @@ def get_flights(origin, destination, departure_date, return_date=None, trip_type
                     [seg.get("departure_airport", {}).get("id", "") for seg in return_segments] +
                     [last_ret.get("arrival_airport", {}).get("id", "")]
                 )
-
-                print(f"{price}€ | {airline} | {out_route} | RETURN: {ret_route}")
 
                 flights.append({
                     "price": price,
@@ -212,8 +247,6 @@ def get_flights(origin, destination, departure_date, return_date=None, trip_type
                     [last.get("arrival_airport", {}).get("id", "")]
                 )
 
-                print(f"{price}€ | ⚠️ ONEWAY | {route}")
-
                 flights.append({
                     "price": price,
                     "duration": duration,
@@ -234,8 +267,6 @@ def get_flights(origin, destination, departure_date, return_date=None, trip_type
     # 🔽 sortieren
     flights = sorted(flights, key=lambda x: x["price"])
 
-    print("========== PARSED FLIGHTS ==========")
-    for f in flights:
-        print(f["price"], "|", f.get("route", "ROUNDTRIP"))
+    logger.debug("parsed %d flights", len(flights))
 
     return flights, price_history
