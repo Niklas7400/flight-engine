@@ -6,6 +6,8 @@ CITY_AIRPORTS = {
     "barcelona": "BCN,GRO",
     "paris": "CDG,ORY,BVA",
     "new york": "JFK,EWR,LGA",
+    "kapverden": "SID,BVC,RAI",
+    "cape verde": "SID,BVC,RAI",
 }
 
 def resolve_airports(input_str: str) -> str:

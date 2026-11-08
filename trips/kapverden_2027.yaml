@@ -1,0 +1,33 @@
+# Trip-Profil: Kapverden 2027
+name: kapverden_2027
+
+# Abflughafen: explizit FRA (der Alias "frankfurt" würde auch HHN einbeziehen)
+origins: [FRA]
+
+# Ziel: Alias "kapverden" wird zu SID,BVC,RAI aufgelöst
+destinations: kapverden
+
+# Reisefenster: früheste Abreise und spätestes Rückflugdatum
+earliest_departure: 2027-03-19
+latest_return: 2027-04-15
+
+# Wunschdauer und erlaubte Spanne in Nächten
+nights: 10
+min_nights: 8
+max_nights: 12
+
+# Wie viele Tage außerhalb des Fensters noch erlaubt sind (0 bis 3)
+flex_days: 1
+
+# Ja/Nein-Fragen: true = stört mich, false = egal
+preferences:
+  # Abflug vor 07:00 vermeiden?
+  avoid_early_departure: true
+  # Ankunft nach 23:00 oder vor 05:00 vermeiden?
+  avoid_late_arrival: true
+  # Umstieg vermeiden?
+  avoid_stops: true
+  # Deutlich längere Reisezeit vermeiden?
+  avoid_long_duration: true
+  # Abweichung von der Wunschdauer vermeiden?
+  avoid_length_deviation: false
