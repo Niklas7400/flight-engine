@@ -49,6 +49,15 @@ def complete_json(prompt: str, system: str, use_search: bool = False) -> Optiona
             return None
         if provider == "gemini":
             text = _gemini(prompt, system, use_search)
+            if text is None and use_search:
+                # Websuche (Grounding) hat im kostenlosen Kontingent eigene, engere Limits
+                # (HTTP 429) -> einmal ohne Suche versuchen.
+                logger.warning("Gemini mit Websuche fehlgeschlagen, neuer Versuch ohne Suche")
+                text = _gemini(prompt, system, False)
+            if text is None and os.getenv("GROQ_API_KEY"):
+                logger.warning("Gemini fehlgeschlagen, Ausweichen auf Groq")
+                provider = "groq"
+                text = _groq(prompt, system)
         elif provider == "groq":
             text = _groq(prompt, system)
         else:
