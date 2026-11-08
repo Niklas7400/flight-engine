@@ -1,0 +1,80 @@
+name: Track flights
+
+on:
+  schedule:
+    - cron: "17 6 */3 * *"
+  workflow_dispatch:
+    inputs:
+      trip:
+        description: "Trip-Name (Datei trips/<trip>.yaml), nur a-z, 0-9 und _"
+        required: true
+        default: kapverden_2027
+        type: string
+      mode:
+        description: "run = volle Suche, track = nur Top-Optionen aktualisieren"
+        required: true
+        default: track
+        type: choice
+        options:
+          - run
+          - track
+
+permissions:
+  contents: read
+
+concurrency:
+  group: track
+  cancel-in-progress: false
+
+jobs:
+  track:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Inputs nur ueber env weitergeben, nie direkt in run: interpolieren.
+      INPUT_TRIP: ${{ inputs.trip }}
+      INPUT_MODE: ${{ inputs.mode }}
+      EVENT_NAME: ${{ github.event_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Trip und Modus pruefen
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "schedule" ]; then
+            TRIP="kapverden_2027"
+            MODE="track"
+          else
+            TRIP="${INPUT_TRIP:-kapverden_2027}"
+            MODE="${INPUT_MODE:-track}"
+          fi
+          if ! [[ "$TRIP" =~ ^[a-z0-9_]+$ ]]; then
+            echo "Ungueltiger Trip-Name: $TRIP" >&2
+            exit 1
+          fi
+          case "$MODE" in
+            run|track) ;;
+            *) echo "Ungueltiger Modus: $MODE" >&2; exit 1 ;;
+          esac
+          echo "TRIP=$TRIP" >> "$GITHUB_ENV"
+          echo "MODE=$MODE" >> "$GITHUB_ENV"
+
+      - name: Python einrichten
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Abhaengigkeiten installieren
+        run: pip install -r requirements.txt
+
+      - name: Suche ausfuehren
+        env:
+          SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'gemini' }}
+        run: python cli.py "$MODE" "trips/$TRIP.yaml" --trip-from-db "$TRIP"
