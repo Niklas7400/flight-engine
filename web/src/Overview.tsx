@@ -60,18 +60,38 @@ function Trigger({ name }: { name: string }) {
   );
 }
 
-function OptionCompact({ o }: { o: TripOption }) {
+/** Tage zwischen Abflug- und Ankunftsdatum (z. B. +1 bei Ankunft am Folgetag). */
+function dayShift(leg: Leg): number {
+  const d = (s: string) => Date.parse(s.slice(0, 10) + "T00:00:00Z");
+  return Math.round((d(leg.arrival) - d(leg.departure)) / 86_400_000);
+}
+
+/** Eine Zeile pro Richtung: Datum, Ab- und Ankunftszeit, Dauer, Umstiege, Airline. */
+function LegLine({ label, leg }: { label: string; leg: Leg }) {
+  const shift = dayShift(leg);
+  const via = leg.stops > 0 ? ` über ${leg.route.slice(1, -1).join(", ")}` : "";
+  return (
+    <div className="leg-line">
+      <span className="leg-label">{label}</span>
+      <span>
+        {dateOf(leg.departure)} · <strong>{timeOf(leg.departure)} → {timeOf(leg.arrival)}</strong>
+        {shift > 0 && <sup className="muted"> +{shift}</sup>}
+        <span className="muted"> · {duration(leg.duration_min)} · {stopsLabel(leg.stops)}{via} · {leg.airlines.join(", ")}</span>
+      </span>
+    </div>
+  );
+}
+
+function OptionCompact({ o, bestPrice }: { o: TripOption; bestPrice: number }) {
+  const diff = o.price - bestPrice;
   return (
     <li className="alt">
       <div>
-        <strong>{eur(o.price)}</strong> · {o.nights} Nächte
-        <div className="muted">
-          {dateOf(o.outbound.departure)} – {dateOf(o.inbound.departure)}
-        </div>
-        <div className="muted">
-          {o.outbound.route.join("→")} · {stopsLabel(Math.max(o.outbound.stops, o.inbound.stops))} · {o.outbound.airlines.join(", ")}
-        </div>
+        <strong>{eur(o.price)}</strong>
+        <span className="muted"> · {o.nights} Nächte{diff !== 0 ? ` · ${diff > 0 ? "+" : "−"}${eur(Math.abs(diff))} ggü. bestem Flug` : " · gleicher Preis"}</span>
       </div>
+      <LegLine label="Hin" leg={o.outbound} />
+      <LegLine label="Rück" leg={o.inbound} />
     </li>
   );
 }
@@ -133,9 +153,8 @@ export default function Overview({ trip }: { trip: Trip }) {
                 <p>
                   {eur(rec.cheapest.price)} ({diff > 0 ? `${eur(diff)} günstiger` : `${eur(-diff)} teurer`}) · {rec.cheapest.nights} Nächte
                 </p>
-                <p className="muted">
-                  {dateOf(rec.cheapest.outbound.departure)} – {dateOf(rec.cheapest.inbound.departure)} · {rec.cheapest.outbound.route.join("→")} · {stopsLabel(Math.max(rec.cheapest.outbound.stops, rec.cheapest.inbound.stops))}
-                </p>
+                <LegLine label="Hin" leg={rec.cheapest.outbound} />
+                <LegLine label="Rück" leg={rec.cheapest.inbound} />
               </section>
             )}
             {rec.hints && rec.hints.length > 0 && (
@@ -148,7 +167,7 @@ export default function Overview({ trip }: { trip: Trip }) {
             {rec.alternatives.length > 0 && (
               <section className="card">
                 <h2>Alternativen</h2>
-                <ul className="alts">{rec.alternatives.map((o) => <OptionCompact key={o.key} o={o} />)}</ul>
+                <ul className="alts">{rec.alternatives.map((o) => <OptionCompact key={o.key} o={o} bestPrice={best.price} />)}</ul>
               </section>
             )}
             <AskAI profile={trip.profile} rec={rec} />
