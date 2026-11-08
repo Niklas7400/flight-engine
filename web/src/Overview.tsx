@@ -38,6 +38,50 @@ function Advice({ title, advice, extra }: { title: string; advice: TimingAdvice;
   );
 }
 
+/** Echte Meldung der Edge Function aus der non-2xx-Antwort lesen. */
+async function invokeErrorMessage(error: unknown): Promise<string> {
+  let msg = (error as { message?: string }).message ?? "unbekannt";
+  const ctx = (error as { context?: unknown }).context;
+  if (ctx instanceof Response) {
+    try {
+      const body = (await ctx.clone().json()) as { error?: string };
+      if (body.error) msg = body.error;
+    } catch { /* kein JSON: Fallback error.message */ }
+  }
+  if (msg.includes("Server nicht konfiguriert")) {
+    msg += " In Supabase fehlen die Secrets GITHUB_REPO und GITHUB_TOKEN (Edge Functions → Secrets).";
+  }
+  return msg;
+}
+
+function TrackingToggle({ trip, onChanged }: { trip: Trip; onChanged: () => Promise<void> | void }) {
+  const [status, setStatus] = useState("");
+  async function choose(value: boolean) {
+    if (value === trip.tracking_enabled) return;
+    setStatus("Speichert …");
+    const { error } = await supabase.from("trips").update({ tracking_enabled: value }).eq("id", trip.id);
+    if (error) return setStatus(`Fehler: ${error.message}`);
+    setStatus("gespeichert");
+    await onChanged();
+  }
+  return (
+    <div className="tracking">
+      <div className="pref">
+        <span id="tracking-label">Automatisches Preis-Tracking</span>
+        <div className="segmented" role="radiogroup" aria-labelledby="tracking-label">
+          {([[true, "an"], [false, "aus"]] as const).map(([value, text]) => (
+            <button key={text} type="button" role="radio" aria-checked={trip.tracking_enabled === value}
+              className={trip.tracking_enabled === value ? "seg selected" : "seg"} onClick={() => void choose(value)}>
+              {trip.tracking_enabled === value ? "✓ " : ""}{text}
+            </button>
+          ))}
+        </div>
+      </div>
+      <p className="muted hint">An: Preise werden alle 3 Tage aktualisiert. Das SerpApi-Kontingent wird auf alle aktiven Trips verteilt. {status && <strong>{status}</strong>}</p>
+    </div>
+  );
+}
+
 function Trigger({ name }: { name: string }) {
   const [status, setStatus] = useState<string>("");
   const [busy, setBusy] = useState(false);
@@ -47,7 +91,7 @@ function Trigger({ name }: { name: string }) {
     setStatus("Suchlauf wird gestartet …");
     const { data, error } = await supabase.functions.invoke("trigger-search", { body: { trip: name, mode } });
     setBusy(false);
-    if (error) setStatus(`Fehler: ${error.message}`);
+    if (error) setStatus(`Fehler: ${await invokeErrorMessage(error)}`);
     else if (data && (data as { ok?: boolean }).ok === false) setStatus(`Fehler: ${(data as { error?: string }).error ?? "unbekannt"}`);
     else setStatus("Suchlauf gestartet. Ergebnisse erscheinen in einigen Minuten.");
   }
@@ -96,7 +140,7 @@ function OptionCompact({ o, bestPrice }: { o: TripOption; bestPrice: number }) {
   );
 }
 
-export default function Overview({ trip }: { trip: Trip }) {
+export default function Overview({ trip, onChanged }: { trip: Trip; onChanged: () => Promise<void> | void }) {
   const [rec, setRec] = useState<Recommendation | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -125,6 +169,7 @@ export default function Overview({ trip }: { trip: Trip }) {
 
   return (
     <div className="stack">
+      <TrackingToggle trip={trip} onChanged={onChanged} />
       <Trigger name={trip.name} />
       {error && <p className="error">{error}</p>}
       {!rec && !error && <p className="muted">Noch keine Empfehlung vorhanden. Starte einen Suchlauf.</p>}
