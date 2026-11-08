@@ -81,7 +81,7 @@ def test_gemini_ohne_suche_setzt_json_mime_type(monkeypatch, recorder, gemini_ke
     assert len(recorder.calls) == 1
     url, kwargs = recorder.calls[0]
     assert url == (
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent"
     )
     assert kwargs["headers"]["x-goog-api-key"] == SECRET
     assert kwargs["timeout"] == 30.0

@@ -1,4 +1,5 @@
 """End-to-end: echte Module, nur SerpApi simuliert (Kapverden-Profil)."""
+import sys
 from datetime import date, timedelta
 
 import pytest
@@ -65,7 +66,14 @@ class FakeSearch:
             for f in ret["best_flights"] + ret["other_flights"]:
                 f["price"] = f["price"] * 2 - 20  # Roundtrip-Rabatt
             return ret
-        return offers(p)
+        res = offers(p)
+        if p.get("type") == 1:
+            # Wie bei echter SerpApi: Roundtrip-Insights passen zum Gesamtpreis und haben Verlauf
+            pi = res["price_insights"]
+            pi["typical_price_range"] = [x * 2 for x in pi["typical_price_range"]]
+            pi["lowest_price"] *= 2
+            pi["price_history"] = [[1791756000 + i * 86400, pi["lowest_price"] + 40] for i in range(20)]
+        return res
 
 
 @pytest.fixture
@@ -108,3 +116,30 @@ def test_insights_match_total_price_scale(env):
     rec = run_trip(profile, env, budget=60, today=TODAY)
     # Zielpreis muss in der Groessenordnung des Gesamtpreises (Hin + Rueck) liegen
     assert rec.timing_rules.target_price is None or rec.timing_rules.target_price > rec.best.price * 0.6
+
+
+def test_roundtrip_insights_and_google_history_drive_timing(env):
+    """Echte Beobachtung: Google meldet bei Roundtrip-Suchen Preisniveau + Verlauf."""
+    profile = load_profile("trips/kapverden_2027.yaml")
+    rec = run_trip(profile, env, budget=60, today=TODAY)
+    # Verlauf von Google ergibt genug Punkte -> keine "zu wenig Daten"-Einschaetzung
+    assert rec.timing_rules.action != BookingAction.WATCH
+    assert len({a.key for a in rec.alternatives}) == len(rec.alternatives)
+    assert rec.best.key not in {a.key for a in rec.alternatives}
+
+
+def test_unpriced_direct_flights_become_hints(env, monkeypatch):
+    real = offers
+
+    def with_unpriced(params):
+        res = real(params)
+        if params["departure_id"].startswith("FRA"):
+            day = params["outbound_date"]
+            res["other_flights"].append({"total_duration": 240, "flights": [
+                seg("FRA", "BVC", day, "06:05", "10:05", "TUI fly")]})  # ohne "price"
+        return res
+
+    monkeypatch.setattr(sys.modules[__name__], "offers", with_unpriced)
+    profile = load_profile("trips/kapverden_2027.yaml")
+    rec = run_trip(profile, env, budget=60, today=TODAY)
+    assert any("TUI fly FRA→BVC um 06:05" in h and "keinen Preis" in h for h in rec.hints)

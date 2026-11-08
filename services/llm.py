@@ -20,7 +20,8 @@ logger = logging.getLogger(__name__)
 TIMEOUT_S = 30.0
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
+# Alias auf das aktuelle Flash-Modell, damit ein abgeschaltetes Modell nicht zu 404 fuehrt
+DEFAULT_GEMINI_MODEL = "gemini-flash-latest"
 DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
 
 _FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL | re.IGNORECASE)

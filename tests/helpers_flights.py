@@ -31,7 +31,7 @@ class FakeApi:
                                           f"tok-{o}{d}{day}"))
         return SearchResult(offers, PriceInsights(typical_low=150.0))
 
-    def roundtrip(self, origins, destinations, out_day, ret_day, storage, max_outbound=3):
+    def roundtrip(self, origins, destinations, out_day, ret_day, storage, max_outbound=3, insights_out=None):
         self.storage.record_api_call("serpapi", "roundtrip")
         self.storage.record_api_call("serpapi", "return_leg")
         self.roundtrips.append((out_day, ret_day))

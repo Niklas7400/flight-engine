@@ -39,6 +39,7 @@ export interface Recommendation {
   timing_llm: TimingAdvice | null;
   api_calls_used: number;
   api_calls_remaining_month: number | null;
+  hints?: string[];
 }
 export interface Preferences {
   avoid_early_departure: boolean;

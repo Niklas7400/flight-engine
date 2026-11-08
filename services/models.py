@@ -83,6 +83,7 @@ class SearchResult:
     offers: list[OneWayOffer]
     insights: PriceInsights
     from_cache: bool = False
+    unpriced: list[Leg] = field(default_factory=list)  # Fluege, fuer die Google keinen Preis zeigt
 
 
 @dataclass
@@ -149,6 +150,7 @@ class Recommendation:
     timing_llm: Optional[TimingAdvice] = None
     api_calls_used: int = 0
     api_calls_remaining_month: Optional[int] = None
+    hints: list[str] = field(default_factory=list)  # z. B. Direktfluege ohne Preis bei Google
 
 
 def to_jsonable(obj):

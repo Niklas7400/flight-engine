@@ -7,8 +7,8 @@ from typing import Callable, Optional
 
 from services.booking_timing import advise, is_holiday_period
 from services.flight_api import NoFlightsError
-from services.models import (PriceInsights, Recommendation, TimingAdvice, TripOption,
-                             TripProfile, to_jsonable)
+from services.models import (Leg, PricePoint, PriceInsights, Recommendation, TimingAdvice,
+                             TripOption, TripProfile, to_jsonable)
 from services.search_planner import PROVIDER, plan_and_search, track_with_insights
 from services.trip_profile import profile_to_dict
 from services.utility import explain_choice
@@ -25,10 +25,14 @@ def _sum(a: Optional[float], b: Optional[float]) -> Optional[float]:
 
 
 def combined_insights(option: TripOption,
-                      insights: dict[tuple[str, date], PriceInsights]) -> Optional[PriceInsights]:
-    """Google-Insights gelten je One-Way-Tag. Fuer Hin+Rueck werden beide Tage addiert,
-    damit die Spanne zum Gesamtpreis passt. Fehlt eine Seite -> None (kein Vergleich
-    mit falscher Groessenordnung)."""
+                      insights: dict[tuple, PriceInsights]) -> Optional[PriceInsights]:
+    """Bevorzugt die Insights der Roundtrip-Suche fuer genau dieses Tagespaar: Sie passen
+    zum Gesamtpreis und enthalten Googles Preisverlauf. Sonst werden die One-Way-Insights
+    beider Tage addiert. Fehlt eine Seite -> None (kein Vergleich mit falscher
+    Groessenordnung)."""
+    rt = insights.get(("rt", option.outbound.departure.date(), option.inbound.departure.date()))
+    if rt is not None and (rt.typical_low is not None or rt.history or rt.lowest_price is not None):
+        return rt
     out = insights.get(("out", option.outbound.departure.date()))
     ret = insights.get(("ret", option.inbound.departure.date()))
     if out is None or ret is None:
@@ -43,14 +47,62 @@ def combined_insights(option: TripOption,
     )
 
 
+def _unique_alternatives(options: list[TripOption], best: TripOption, n: int) -> list[TripOption]:
+    """Naechstbeste Optionen, je Key (Tage + Flughaefen) nur einmal."""
+    seen, result = {best.key}, []
+    for opt in options:
+        if opt.key not in seen:
+            seen.add(opt.key)
+            result.append(opt)
+            if len(result) >= n:
+                break
+    return result
+
+
+def _fmt_day(d: date) -> str:
+    return f"{d.day}.{d.month}."
+
+
+def unpriced_hints(unpriced: list[tuple[str, Leg]], profile: TripProfile) -> list[str]:
+    """Direktfluege, fuer die Google keinen Preis zeigt (typisch fuer Charter), als Hinweis.
+    Sie fliessen nicht in die Bewertung ein, koennen aber guenstig sein."""
+    groups: dict[tuple, set] = {}
+    for direction, leg in unpriced:
+        if leg.stops != 0:
+            continue
+        key = (direction, ", ".join(leg.airlines), leg.origin, leg.destination,
+               leg.departure.strftime("%H:%M"))
+        groups.setdefault(key, set()).add(leg.departure.date())
+    hints = []
+    for (direction, airline, o, d, t), days in sorted(groups.items()):
+        label = "Hinflug" if direction == "out" else "Rückflug"
+        day_list = ", ".join(_fmt_day(x) for x in sorted(days))
+        hints.append(f"{label} direkt mit {airline} {o}→{d} um {t} am {day_list}: "
+                     f"Google zeigt keinen Preis. Direkt beim Anbieter prüfen.")
+    return hints
+
+
+def _with_google_history(series: list[PricePoint], ins: Optional[PriceInsights]) -> list[PricePoint]:
+    """Solange die eigene Reihe kurz ist, Googles Preisverlauf fuer diese Verbindung
+    voranstellen (nur aeltere Punkte als die eigenen)."""
+    if not ins or not ins.history or len(series) >= 5:
+        return series
+    first_own = min((p.observed_at for p in series), default=None)
+    google = [PricePoint(observed_at=datetime.fromtimestamp(ts), price=float(price))
+              for ts, price in ins.history]
+    if first_own is not None:
+        google = [p for p in google if p.observed_at < first_own]
+    return sorted(google + series, key=lambda p: p.observed_at)
+
+
 def _evaluate(profile: TripProfile, storage, options: list[TripOption],
-              insights: dict[tuple[str, date], PriceInsights], today: date, calls_start: int,
-              llm_timing_fn: Optional[Callable]) -> Recommendation:
+              insights: dict[tuple, PriceInsights], today: date, calls_start: int,
+              llm_timing_fn: Optional[Callable], unpriced: Optional[list] = None) -> Recommendation:
     if not options:
         raise NoFlightsError("Keine Flugoptionen gefunden")
     best = options[0]
     cheapest = min(options, key=lambda o: o.price)
-    alternatives = options[1:1 + N_ALTERNATIVES]
+    alternatives = _unique_alternatives(options[1:], best, N_ALTERNATIVES)
 
     trip_id = storage.upsert_trip(profile.name, profile_to_dict(profile))
     now = datetime.now()
@@ -61,6 +113,7 @@ def _evaluate(profile: TripProfile, storage, options: list[TripOption],
     if len(series) < 3:
         series = storage.get_best_price_series(trip_id)
     day_insights = combined_insights(best, insights)
+    series = _with_google_history(series, day_insights)
     rules = advise(best, series, day_insights, today,
                    is_holiday_period(best.outbound.departure.date()))
 
@@ -78,6 +131,7 @@ def _evaluate(profile: TripProfile, storage, options: list[TripOption],
         timing_rules=rules, timing_llm=timing_llm,
         api_calls_used=used - calls_start,
         api_calls_remaining_month=MONTHLY_LIMIT - used,
+        hints=unpriced_hints(unpriced or [], profile),
     )
     storage.save_recommendation(trip_id, to_jsonable(rec))
     return rec
@@ -87,8 +141,9 @@ def run_trip(profile: TripProfile, storage, budget: int, today: Optional[date] =
              llm_timing_fn: Optional[Callable] = None) -> Recommendation:
     today = today or date.today()
     start = storage.api_calls_this_month(PROVIDER)
-    options, insights = plan_and_search(profile, storage, budget, today)
-    return _evaluate(profile, storage, options, insights, today, start, llm_timing_fn)
+    unpriced: list = []
+    options, insights = plan_and_search(profile, storage, budget, today, unpriced_out=unpriced)
+    return _evaluate(profile, storage, options, insights, today, start, llm_timing_fn, unpriced)
 
 
 def track_trip(profile: TripProfile, storage, budget: int, today: Optional[date] = None,
@@ -104,8 +159,10 @@ def track_trip(profile: TripProfile, storage, budget: int, today: Optional[date]
         if isinstance(o, dict) and o.get("key"):
             keys.append(o["key"])
     keys = list(dict.fromkeys(keys))
-    options, insights = track_with_insights(profile, storage, keys, budget, today) if keys else ([], {})
+    unpriced: list = []
+    options, insights = (track_with_insights(profile, storage, keys, budget, today, unpriced_out=unpriced)
+                         if keys else ([], {}))
     if not options:
         used = storage.api_calls_this_month(PROVIDER) - start
         return run_trip(profile, storage, max(budget - used, 0), today, llm_timing_fn)
-    return _evaluate(profile, storage, options, insights, today, start, llm_timing_fn)
+    return _evaluate(profile, storage, options, insights, today, start, llm_timing_fn, unpriced)
