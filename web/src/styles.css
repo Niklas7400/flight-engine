@@ -35,7 +35,7 @@ input.invalid { border-color: var(--err); }
 .row > input { flex: 1 1 80px; }
 fieldset { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px 12px; margin: 0; }
 .tabs { display: flex; gap: 4px; margin: 8px 0 12px; border-bottom: 1px solid var(--border); overflow-x: auto; }
-.tab { background: transparent; color: var(--muted); border-radius: 8px 8px 0 0; white-space: nowrap; }
+.tab { flex: 1 1 auto; background: transparent; color: var(--muted); border-radius: 8px 8px 0 0; white-space: nowrap; padding: 10px 8px; }
 .tab.active { color: var(--accent); border-bottom: 2px solid var(--accent); }
 .facts { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 8px 0; }
 .facts dt { color: var(--muted); } .facts dd { margin: 0; }
@@ -47,10 +47,19 @@ fieldset { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12p
 .alt { padding: 8px 0; border-top: 1px solid var(--border); }
 .alt:first-child { border-top: 0; }
 .pref { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 0; }
-.toggle { background: var(--border); color: var(--fg); min-width: 100px; }
-.toggle.on { background: var(--accent); color: var(--accent-fg); }
+.segmented { display: flex; width: 240px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; flex-shrink: 0; }
+.seg { flex: 1; background: transparent; color: var(--muted); border-radius: 0; font-weight: 400; padding: 10px 8px; }
+.seg + .seg { border-left: 1px solid var(--border); }
+.seg.selected { background: var(--accent); color: var(--accent-fg); font-weight: 600; }
+.hint { margin: 0 0 4px; font-size: .9em; }
+.save-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .chart { width: 100%; }
 table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: 6px 4px; border-top: 1px solid var(--border); font-size: .92rem; }
 .num { text-align: right; }
 .trigger { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 16px; }
+
+@media (max-width: 520px) {
+  .pref { flex-direction: column; align-items: stretch; gap: 6px; padding: 8px 0; }
+  .segmented { width: 100%; }
+}
