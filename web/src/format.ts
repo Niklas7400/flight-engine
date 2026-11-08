@@ -3,7 +3,7 @@ import type { Action, Leg } from "./types";
 export const eur = (n: number | null | undefined): string =>
   n == null ? "–" : new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(n);
 
-export const duration = (min: number): string => `${Math.floor(min / 60)}:${String(min % 60).padStart(2, "0")} h`;
+export const duration = (min: number): string => `${Math.floor(min / 60)}:${String(min % 60).padStart(2, "0")}\u00a0h`;
 
 export const timeOf = (iso: string): string => iso.slice(11, 16);
 

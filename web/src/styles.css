@@ -70,3 +70,6 @@ a.button.ghost { background: transparent; color: var(--accent); border: 1px soli
 details summary { cursor: pointer; color: var(--accent); margin-top: 8px; }
 textarea.prompt { width: 100%; box-sizing: border-box; margin-top: 8px; font: 0.85em/1.4 ui-monospace, monospace; background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 8px; padding: 8px; }
 @media (max-width: 520px) { .ai-buttons > * { flex: 1 1 calc(50% - 4px); } }
+
+.leg-line { display: flex; gap: 8px; margin-top: 4px; font-size: .95em; line-height: 1.4; }
+.leg-label { flex: 0 0 2.6em; color: var(--muted); }
