@@ -137,8 +137,8 @@ def advise(best: TripOption, series: list[PricePoint], insights: Optional[PriceI
     reasons: list[str] = []
     if holiday_period:
         name = holiday_name(dep) or "Ferienzeit"
-        reasons.append(f"Reise fällt in die {name}: "
-                       "Charter-Kontingente werden erfahrungsgemäß knapp.")
+        reasons.append(f"Reise fällt in die {name}: Die Nachfrage ist hoch, "
+                       "günstige Plätze sind oft früh vergeben.")
 
     # Regel 1
     if days < near:

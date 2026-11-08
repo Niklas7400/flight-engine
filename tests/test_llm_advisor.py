@@ -128,8 +128,11 @@ def test_prompt_contains_facts(monkeypatch):
     assert seen["use_search"] is True
     for s in ("FRA", "SID", "Condor", "2027-02-10", "2027-02-20", "94", "500.0",
               "typisch_niedrig", "430", "WAIT", "2026-12-01", "440", "Regel-Grund",
-              "Hessen", "Binter"):
+              "Abflugland: FRA", "FRA–SID", "Airlines: Condor"):
         assert s in p
+    # nichts Streckenspezifisches fest im Prompt
+    for s in ("Hessen", "Binter", "Kapverden", "TUI", "TAP"):
+        assert s not in p
     assert p.count('"preis_eur"') == 30 + 1 + 0 or p.count('"datum"') == 30
     assert '"preis_eur": 439.0' in p and '"preis_eur": 409.0' not in p
     assert "JSON" in seen["system"]
