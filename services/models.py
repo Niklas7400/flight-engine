@@ -131,11 +131,12 @@ class PricePoint:
 @dataclass
 class TimingAdvice:
     action: BookingAction
-    decide_by: Optional[date]          # spaetestens bis dann buchen
+    decide_by: Optional[date]          # spaetestens bis dann buchen (nie bei BUY_NOW)
     target_price: Optional[float]      # bei WAIT: unter diesem Preis sofort buchen
-    confidence: str                    # "low" | "medium" | "high"
+    confidence: str                    # "low" | "medium" | "high"; Regeln: Datenmenge, LLM: Selbsteinschaetzung
     reasons: list[str]                 # deutsche, kurze Saetze
     source: str = "rules"              # "rules" | "llm"
+    basis: Optional[str] = None        # Regeln: worauf confidence beruht, z. B. "8 Preispunkte, Google-Preisspanne"
 
 
 @dataclass

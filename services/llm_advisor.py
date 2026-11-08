@@ -188,6 +188,8 @@ def _validate(data: Any, best: TripOption, series: list[PricePoint],
     if not last_search_used():
         reasons.append("Ohne Websuche erstellt: Aussagen zu Ferien und Flugplänen beruhen auf "
                        "dem Allgemeinwissen des Modells und sind nicht geprüft.")
+    if action is BookingAction.BUY_NOW:
+        decide_by = None  # "jetzt" braucht keine Frist
     return TimingAdvice(action=action, decide_by=decide_by, target_price=target,
                         confidence=confidence, reasons=reasons, source="llm")
 

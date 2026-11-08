@@ -146,3 +146,8 @@ def test_hinweis_ohne_websuche(run, monkeypatch):
 def test_kein_hinweis_mit_websuche(run, monkeypatch):
     monkeypatch.setattr(llm_advisor, "last_search_used", lambda: True)
     assert not any("Ohne Websuche" in r for r in run(good()).reasons)
+
+
+def test_buy_now_ohne_frist(run):
+    a = run(good(action="BUY_NOW", decide_by="2026-12-01"))
+    assert a.action is BookingAction.BUY_NOW and a.decide_by is None

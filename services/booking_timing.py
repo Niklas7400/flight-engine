@@ -95,7 +95,7 @@ def _eur(x: float) -> str:
     return f"{round(x)} €"
 
 
-def advise(best: TripOption, series: list[PricePoint], insights: Optional[PriceInsights],
+def _advise(best: TripOption, series: list[PricePoint], insights: Optional[PriceInsights],
            today: date, holiday_period: bool) -> TimingAdvice:
     """Buchungsempfehlung. Rangfolge (erste zutreffende Regel bestimmt die Aktion):
 
@@ -191,3 +191,23 @@ def advise(best: TripOption, series: list[PricePoint], insights: Optional[PriceI
         reasons.append(f"Unter {_eur(target)} sofort buchen, spätestens bis "
                        f"{decide_by.strftime('%d.%m.%Y')}.")
     return TimingAdvice(action, decide_by, target, confidence, reasons)
+
+
+def _basis(series: list[PricePoint], insights: Optional[PriceInsights]) -> str:
+    n = len(series)
+    parts = [f"{n} Preispunkt{'' if n == 1 else 'e'}"]
+    has_range = insights is not None and (
+        insights.typical_low is not None or insights.typical_high is not None)
+    parts.append("Google-Preisspanne" if has_range else "keine Google-Preisspanne")
+    return ", ".join(parts)
+
+
+def advise(best: TripOption, series: list[PricePoint], insights: Optional[PriceInsights],
+           today: date, holiday_period: bool) -> TimingAdvice:
+    """Wie _advise; zusaetzlich: bei BUY_NOW keine Frist (je frueher, desto besser) und
+    `basis` beschreibt, worauf `confidence` beruht (Datenmenge, nicht Trefferwahrscheinlichkeit)."""
+    adv = _advise(best, series, insights, today, holiday_period)
+    if adv.action is BookingAction.BUY_NOW:
+        adv.decide_by = None
+    adv.basis = _basis(series, insights)
+    return adv
