@@ -422,28 +422,40 @@ def search_oneway(origins: list, destinations: list, day: date, storage) -> Sear
     """Einweg-Suche fuer einen Tag, alle Flughaefen in EINEM Call (type=2)."""
     params = _base_params(origins, destinations, day, 2)
     results, from_cache = _call_serpapi(params, storage, "oneway")
-    offers = []
+    offers, unpriced = [], []
     for item in _all_flights(results):
         price = _parse_price(item.get("price"))
         leg = _parse_leg(item)
-        if price is None or leg is None:
+        if leg is None:
+            continue
+        if price is None:
+            # z. B. TUI-Charter: Google kennt den Flug, zeigt aber keinen Preis
+            unpriced.append(leg)
             continue
         offers.append(OneWayOffer(leg=leg, price=price, booking_token=item.get("booking_token")))
     offers.sort(key=lambda o: o.price)
-    return SearchResult(offers=offers, insights=_parse_insights(results), from_cache=from_cache)
+    return SearchResult(offers=offers, insights=_parse_insights(results), from_cache=from_cache,
+                        unpriced=unpriced)
 
 
 def search_roundtrip(origins: list, destinations: list, out_day: date, ret_day: date,
-                     storage, max_outbound: int = 3) -> list:
+                     storage, max_outbound: int = 3,
+                     insights_out: Optional[list] = None) -> list:
     """Echte Roundtrip-Suche (type=1).
 
     Echte API-Calls: 1 (Hinflug-Optionen) + bis zu max_outbound (je ein Folge-Call mit
     `departure_token` fuer die Rueckfluege), also maximal 1 + max_outbound; Cache-Treffer
     zaehlen nicht. Ein Folge-Call ohne Ergebnis ueberspringt die Hinflug-Option.
+
+    insights_out: Liste, an die die PriceInsights der Roundtrip-Suche angehaengt werden.
+    Google liefert Preisniveau, typische Spanne und Verlauf nur bei Roundtrip-Suchen,
+    und zwar passend zum Gesamtpreis.
     """
     params = _base_params(origins, destinations, out_day, 1)
     params["return_date"] = ret_day.isoformat()
     results, _ = _call_serpapi(params, storage, "roundtrip")
+    if insights_out is not None:
+        insights_out.append(_parse_insights(results))
 
     candidates = []
     for item in _all_flights(results):

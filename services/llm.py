@@ -20,7 +20,8 @@ logger = logging.getLogger(__name__)
 TIMEOUT_S = 30.0
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
+# Alias auf das aktuelle Flash-Modell, damit ein abgeschaltetes Modell nicht zu 404 fuehrt
+DEFAULT_GEMINI_MODEL = "gemini-flash-latest"
 DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
 
 _FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL | re.IGNORECASE)
@@ -48,6 +49,15 @@ def complete_json(prompt: str, system: str, use_search: bool = False) -> Optiona
             return None
         if provider == "gemini":
             text = _gemini(prompt, system, use_search)
+            if text is None and use_search:
+                # Websuche (Grounding) hat im kostenlosen Kontingent eigene, engere Limits
+                # (HTTP 429) -> einmal ohne Suche versuchen.
+                logger.warning("Gemini mit Websuche fehlgeschlagen, neuer Versuch ohne Suche")
+                text = _gemini(prompt, system, False)
+            if text is None and os.getenv("GROQ_API_KEY"):
+                logger.warning("Gemini fehlgeschlagen, Ausweichen auf Groq")
+                provider = "groq"
+                text = _groq(prompt, system)
         elif provider == "groq":
             text = _groq(prompt, system)
         else:

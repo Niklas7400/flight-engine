@@ -144,7 +144,11 @@ def _pair(opt: TripOption) -> tuple[date, date]:
 # ---------------------------------------------------------------------------
 
 def plan_and_search(profile: TripProfile, storage, budget: int,
-                    today: Optional[date] = None) -> tuple[list[TripOption], dict[tuple[str, date], PriceInsights]]:
+                    today: Optional[date] = None, unpriced_out: Optional[list] = None
+                    ) -> tuple[list[TripOption], dict[tuple, PriceInsights]]:
+    """Insights-Schluessel: ("out", tag), ("ret", tag) aus One-Way-Suchen und
+    ("rt", hin, rueck) aus Roundtrip-Suchen (nur diese passen zum Gesamtpreis).
+    unpriced_out: sammelt (richtung, Leg) fuer Fluege ohne Preis bei Google."""
     today = today or date.today()
     b = _Budget(storage, budget)
     out_days, ret_days = outbound_days(profile, today), return_days(profile, today)
@@ -163,11 +167,15 @@ def plan_and_search(profile: TripProfile, storage, budget: int,
             if res is not None:
                 out_offers[day] = res.offers
                 insights[("out", day)] = res.insights
+                if unpriced_out is not None:
+                    unpriced_out.extend(("out", leg) for leg in res.unpriced)
         else:
             res = _oneway(storage, profile.destinations, profile.origins, day)
             if res is not None:
                 ret_offers[day] = res.offers
                 insights[("ret", day)] = res.insights
+                if unpriced_out is not None:
+                    unpriced_out.extend(("ret", leg) for leg in res.unpriced)
 
     min_n = profile.min_nights - profile.flex_days
     max_n = profile.max_nights + profile.flex_days
@@ -195,8 +203,11 @@ def plan_and_search(profile: TripProfile, storage, budget: int,
             break
         od, rd = _pair(opt)
         try:
+            rt_ins: list[PriceInsights] = []
             extra.extend(search_roundtrip([opt.outbound.origin], [opt.outbound.destination],
-                                          od, rd, storage, max_outbound=1))
+                                          od, rd, storage, max_outbound=1, insights_out=rt_ins))
+            if rt_ins:
+                insights[("rt", od, rd)] = rt_ins[0]
         except MissingApiKeyError:
             raise
         except (NoFlightsError, UpstreamError) as exc:
@@ -220,8 +231,11 @@ def _parse_key(key: str) -> tuple[tuple[str, str, date], tuple[str, str, date]]:
 
 
 def track_with_insights(profile: TripProfile, storage, keys: list[str], budget: int,
-                        today: Optional[date] = None
-                        ) -> tuple[list[TripOption], dict[tuple[str, date], PriceInsights]]:
+                        today: Optional[date] = None, unpriced_out: Optional[list] = None
+                        ) -> tuple[list[TripOption], dict[tuple, PriceInsights]]:
+    """Wie plan_and_search, aber nur fuer die Tage der Keys. Der erste Key (die bisher
+    beste Option) wird zusaetzlich per Roundtrip abgefragt (2 Calls), damit Googles
+    Preisniveau und Verlauf fuer genau diese Verbindung aktuell bleiben."""
     today = today or date.today()
     b = _Budget(storage, budget)
     wanted: set[str] = set()
@@ -253,6 +267,8 @@ def track_with_insights(profile: TripProfile, storage, keys: list[str], budget: 
         if res is None:
             continue
         insights[(kind, day)] = res.insights
+        if unpriced_out is not None:
+            unpriced_out.extend((kind, leg) for leg in res.unpriced)
         if kind == "out":
             out_offers[day] = res.offers
         else:
@@ -264,6 +280,23 @@ def track_with_insights(profile: TripProfile, storage, keys: list[str], budget: 
             for opt in _combine(oo, ro, profile.allow_open_jaw, top=False):
                 if opt.key in wanted and (opt.key not in best or opt.price < best[opt.key].price):
                     best[opt.key] = opt
+
+    first = next((k for k in keys if k in wanted), None)
+    if first and b.left >= REFINE_CALLS:
+        (oo, od, odate), (_ro, _rd, rdate) = _parse_key(first)
+        if odate >= today:
+            try:
+                rt_ins: list[PriceInsights] = []
+                for opt in search_roundtrip([oo], [od], odate, rdate, storage, max_outbound=1,
+                                            insights_out=rt_ins):
+                    if opt.key in wanted and (opt.key not in best or opt.price < best[opt.key].price):
+                        best[opt.key] = opt
+                if rt_ins:
+                    insights[("rt", odate, rdate)] = rt_ins[0]
+            except MissingApiKeyError:
+                raise
+            except (NoFlightsError, UpstreamError) as exc:
+                logger.warning("Roundtrip %s/%s uebersprungen: %s", odate, rdate, type(exc).__name__)
     return apply_utility(list(best.values()), profile), insights
 
 

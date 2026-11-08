@@ -118,7 +118,9 @@ def test_track_with_keys(profile, setup):
     assert sorted(o.key for o in res) == sorted([key, key2])
     # dedupliziert: 1 Hinflugtag + 2 Rueckflugtage
     assert len(api.oneway_days) == 3
-    assert storage.api_calls_this_month("serpapi") == 3
+    # + Roundtrip-Abfrage der ersten (besten) Option, damit Googles Preisniveau aktuell bleibt
+    assert api.roundtrips == [(date(2027, 3, 20), date(2027, 3, 30))]
+    assert storage.api_calls_this_month("serpapi") == 3 + 2
 
 
 def test_track_budget(profile, setup):

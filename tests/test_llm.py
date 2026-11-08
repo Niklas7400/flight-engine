@@ -81,7 +81,7 @@ def test_gemini_ohne_suche_setzt_json_mime_type(monkeypatch, recorder, gemini_ke
     assert len(recorder.calls) == 1
     url, kwargs = recorder.calls[0]
     assert url == (
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent"
     )
     assert kwargs["headers"]["x-goog-api-key"] == SECRET
     assert kwargs["timeout"] == 30.0
@@ -262,3 +262,33 @@ def test_last_sources_werden_bei_fehler_geleert(recorder, gemini_key):
     recorder.response = httpx.Response(503)
     assert llm.complete_json("p", "s", use_search=True) is None
     assert llm.last_sources() == []
+
+
+def test_gemini_429_mit_suche_versucht_ohne_suche(monkeypatch, gemini_key):
+    """Echter Lauf: Grounding im kostenlosen Kontingent -> 429. Ohne Suche erneut versuchen."""
+    calls = []
+
+    def post(url, **kwargs):
+        calls.append(kwargs["json"])
+        if "tools" in kwargs["json"]:
+            return httpx.Response(429, json={"error": "quota"})
+        return ok(gemini_payload('{"a": 1}'))
+
+    monkeypatch.setattr(llm.httpx, "post", post)
+    assert llm.complete_json("p", "s", use_search=True) == {"a": 1}
+    assert len(calls) == 2 and "tools" not in calls[1]
+
+
+def test_gemini_fehler_weicht_auf_groq_aus(monkeypatch, gemini_key):
+    monkeypatch.setenv("GROQ_API_KEY", SECRET)
+    urls = []
+
+    def post(url, **kwargs):
+        urls.append(url)
+        if "generativelanguage" in url:
+            return httpx.Response(429, json={"error": "quota"})
+        return ok(groq_payload('{"b": 2}'))
+
+    monkeypatch.setattr(llm.httpx, "post", post)
+    assert llm.complete_json("p", "s", use_search=True) == {"b": 2}
+    assert sum("generativelanguage" in u for u in urls) == 2 and "groq" in urls[-1]

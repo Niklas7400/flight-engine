@@ -84,3 +84,16 @@ def test_track_trip_uses_keys(profile, setup):
     used = storage.api_calls_this_month("serpapi") - before
     assert 0 < used <= 30 and rec.api_calls_used == used
     assert rec.best.key in {first.best.key, first.cheapest.key, *(a.key for a in first.alternatives)}
+
+
+def test_google_history_merges_with_timezone_aware_db_series():
+    """Supabase liefert observed_at mit Zeitzone, Googles Verlauf ist Unix-Zeit."""
+    from datetime import datetime as dt, timezone
+    from services.engine import _with_google_history
+    from services.models import PricePoint, PriceInsights
+    own = [PricePoint(observed_at=dt(2026, 11, 8, 11, 0, tzinfo=timezone.utc), price=369.0)]
+    ins = PriceInsights(history=[(1791756000, 404.0), (1794092400, 369.0)])
+    merged = _with_google_history(own, ins)
+    assert [p.price for p in merged][-1] == 369.0
+    assert len(merged) == 3
+    assert all(p.observed_at.tzinfo is None for p in merged)

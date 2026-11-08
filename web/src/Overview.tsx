@@ -130,6 +130,13 @@ export default function Overview({ trip }: { trip: Trip }) {
                 </p>
               </section>
             )}
+            {rec.hints && rec.hints.length > 0 && (
+              <section className="card small">
+                <h3>Direktflüge ohne Preis bei Google</h3>
+                <p className="muted">Nicht in der Bewertung enthalten. Charterflüge können trotzdem günstig sein.</p>
+                <ul>{rec.hints.map((h) => <li key={h}>{h}</li>)}</ul>
+              </section>
+            )}
             {rec.alternatives.length > 0 && (
               <section className="card">
                 <h2>Alternativen</h2>
