@@ -49,7 +49,21 @@ export default function EditTrip({ trip, onSaved }: { trip: Trip; onSaved: () =>
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const set = <K extends keyof Profile>(k: K, v: Profile[K]) => setP((cur) => ({ ...cur, [k]: v }));
+  const set = <K extends keyof Profile>(k: K, v: Profile[K]) => {
+    setMsg(null);
+    setP((cur) => ({ ...cur, [k]: v }));
+  };
+  const current = (): Profile => ({
+    ...p,
+    origins: [...new Set(origins.filter(Boolean))],
+    destinations: [...new Set(dests.filter(Boolean))],
+  });
+  // Ungespeicherte Aenderungen: aktueller Stand gegen den zuletzt gespeicherten
+  const dirty = JSON.stringify(current()) !== JSON.stringify({
+    ...trip.profile,
+    origins: [...new Set(trip.profile.origins)],
+    destinations: [...new Set(trip.profile.destinations)],
+  });
   const num = (v: string) => (v === "" ? 0 : Number(v));
 
   function validate(o: string[], d: string[]): string | null {
@@ -65,12 +79,10 @@ export default function EditTrip({ trip, onSaved }: { trip: Trip; onSaved: () =>
 
   async function save(e: FormEvent) {
     e.preventDefault();
-    const o = [...new Set(origins.filter(Boolean))];
-    const d = [...new Set(dests.filter(Boolean))];
-    const err = validate(o, d);
+    const profile = current();
+    const err = validate(profile.origins, profile.destinations);
     if (err) return setMsg({ ok: false, text: err });
     setBusy(true);
-    const profile: Profile = { ...p, origins: o, destinations: d };
     const { error } = await supabase.from("trips").update({ profile }).eq("id", trip.id);
     setBusy(false);
     if (error) return setMsg({ ok: false, text: error.message });
@@ -103,27 +115,35 @@ export default function EditTrip({ trip, onSaved }: { trip: Trip; onSaved: () =>
           <input type="number" min={0} max={3} value={p.flex_days} onChange={(e) => set("flex_days", num(e.target.value))} />
         </label>
       </div>
-      <AirportFields label="Abflughäfen (bis zu 3)" values={origins} onChange={setOrigins} />
-      <AirportFields label="Zielflughäfen (bis zu 3)" values={dests} onChange={setDests} />
+      <AirportFields label="Abflughäfen (bis zu 3)" values={origins} onChange={(v) => { setMsg(null); setOrigins(v); }} />
+      <AirportFields label="Zielflughäfen (bis zu 3)" values={dests} onChange={(v) => { setMsg(null); setDests(v); }} />
       <fieldset>
         <legend>Was stört dich?</legend>
+        <p className="muted hint">Was dich stört, bekommt bei der Bewertung einen Aufschlag. Markiert ist die aktuelle Einstellung.</p>
         {PREFS.map(([k, label]) => (
           <div className="pref" key={k}>
-            <span>{label}</span>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={p.preferences[k]}
-              className={p.preferences[k] ? "toggle on" : "toggle"}
-              onClick={() => set("preferences", { ...p.preferences, [k]: !p.preferences[k] })}
-            >
-              {p.preferences[k] ? "stört mich" : "egal"}
-            </button>
+            <span id={`pref-${k}`}>{label}</span>
+            <div className="segmented" role="radiogroup" aria-labelledby={`pref-${k}`}>
+              {([[true, "stört mich"], [false, "egal"]] as const).map(([value, text]) => (
+                <button
+                  key={text}
+                  type="button"
+                  role="radio"
+                  aria-checked={p.preferences[k] === value}
+                  className={p.preferences[k] === value ? "seg selected" : "seg"}
+                  onClick={() => set("preferences", { ...p.preferences, [k]: value })}
+                >
+                  {p.preferences[k] === value ? "✓ " : ""}{text}
+                </button>
+              ))}
+            </div>
           </div>
         ))}
       </fieldset>
-      <button type="submit" disabled={busy}>Speichern</button>
-      <p className="muted">Wirkt beim nächsten Suchlauf.</p>
+      <div className="save-row">
+        <button type="submit" disabled={busy || !dirty}>Speichern</button>
+        <span className="muted">{busy ? "Speichert …" : dirty ? "Ungespeicherte Änderungen" : msg?.ok ? "" : "Alles gespeichert"}</span>
+      </div>
       {msg && <p className={msg.ok ? "ok" : "error"}>{msg.text}</p>}
     </form>
   );
