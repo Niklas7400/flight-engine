@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Callable, Optional
 
 from services.booking_timing import advise, is_holiday_period
@@ -82,13 +82,21 @@ def unpriced_hints(unpriced: list[tuple[str, Leg]], profile: TripProfile) -> lis
     return hints
 
 
+def _naive_utc(value: datetime) -> datetime:
+    return value.astimezone(timezone.utc).replace(tzinfo=None) if value.tzinfo else value
+
+
 def _with_google_history(series: list[PricePoint], ins: Optional[PriceInsights]) -> list[PricePoint]:
     """Solange die eigene Reihe kurz ist, Googles Preisverlauf fuer diese Verbindung
     voranstellen (nur aeltere Punkte als die eigenen)."""
     if not ins or not ins.history or len(series) >= 5:
         return series
+    # Einheitlich naive UTC-Zeiten: Supabase liefert Zeitstempel mit Zeitzone,
+    # MemoryStorage ohne, Googles Verlauf ist Unix-Zeit.
+    series = [PricePoint(observed_at=_naive_utc(p.observed_at), price=p.price) for p in series]
     first_own = min((p.observed_at for p in series), default=None)
-    google = [PricePoint(observed_at=datetime.fromtimestamp(ts), price=float(price))
+    google = [PricePoint(observed_at=_naive_utc(datetime.fromtimestamp(ts, tz=timezone.utc)),
+                         price=float(price))
               for ts, price in ins.history]
     if first_own is not None:
         google = [p for p in google if p.observed_at < first_own]
