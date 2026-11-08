@@ -12,7 +12,7 @@ import re
 from datetime import date
 from typing import Any, Optional
 
-from services.llm import complete_json, last_sources
+from services.llm import complete_json, last_search_used, last_sources
 from services.models import (
     BookingAction, PriceInsights, PricePoint, TimingAdvice, TripOption,
 )
@@ -180,6 +180,9 @@ def _validate(data: Any, best: TripOption, series: list[PricePoint],
     sources = [s for s in last_sources() if isinstance(s, str) and s][:MAX_SOURCES]
     if sources:
         reasons.append("Quellen: " + ", ".join(sources))
+    if not last_search_used():
+        reasons.append("Ohne Websuche erstellt: Aussagen zu Ferien und Flugplänen beruhen auf "
+                       "dem Allgemeinwissen des Modells und sind nicht geprüft.")
     return TimingAdvice(action=action, decide_by=decide_by, target_price=target,
                         confidence=confidence, reasons=reasons, source="llm")
 

@@ -23,11 +23,30 @@ GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 # Alias auf das aktuelle Flash-Modell, damit ein abgeschaltetes Modell nicht zu 404 fuehrt
 DEFAULT_GEMINI_MODEL = "gemini-flash-latest"
 DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
+GROQ_MODELS_URL = "https://api.groq.com/openai/v1/models"
+# Bevorzugte Modelle, falls das konfigurierte abgeschaltet ist (Reihenfolge = Vorrang).
+GROQ_PREFERRED = ("openai/gpt-oss-120b", "llama-3.3-70b-versatile", "openai/gpt-oss-20b")
+# Keine Chat-Modelle (Audio, Sprachausgabe, Moderation)
+_GROQ_NON_CHAT = ("whisper", "tts", "guard", "playai", "orpheus", "distil")
+
+_last_status: Optional[int] = None
 
 _FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL | re.IGNORECASE)
 
 # Grounding-URLs des letzten Gemini-Calls (nur gefuellt, wenn use_search=True).
 _last_sources: list[str] = []
+_last_search_used = False
+
+NO_SEARCH_NOTE = (
+    "\nWICHTIG: Fuer diese Antwort steht KEINE Websuche zur Verfuegung. Behaupte nichts ueber "
+    "aktuelle Flugplaene, Streiks oder Ereignisse. Stuetze dich auf die uebergebenen Fakten und "
+    "allgemein bekanntes Wissen (z. B. dass Osterferien die Nachfrage erhoehen)."
+)
+
+
+def last_search_used() -> bool:
+    """True, wenn die letzte erfolgreiche Antwort mit Websuche erstellt wurde."""
+    return _last_search_used
 
 
 def last_sources() -> list[str]:
@@ -41,30 +60,34 @@ def complete_json(prompt: str, system: str, use_search: bool = False) -> Optiona
     Gibt None zurueck bei: Provider "none", fehlendem Key, HTTP-/Netzwerkfehler,
     Timeout, ungueltigem JSON oder JSON, das kein Objekt ist.
     """
-    global _last_sources
+    global _last_sources, _last_search_used
     _last_sources = []
+    _last_search_used = False
     provider = (os.getenv("LLM_PROVIDER") or "gemini").strip().lower()
+    searched = False
     try:
         if provider == "none":
             return None
         if provider == "gemini":
             text = _gemini(prompt, system, use_search)
+            searched = use_search and text is not None
             if text is None and use_search:
                 # Websuche (Grounding) hat im kostenlosen Kontingent eigene, engere Limits
                 # (HTTP 429) -> einmal ohne Suche versuchen.
                 logger.warning("Gemini mit Websuche fehlgeschlagen, neuer Versuch ohne Suche")
-                text = _gemini(prompt, system, False)
+                text = _gemini(prompt, system + NO_SEARCH_NOTE, False)
             if text is None and os.getenv("GROQ_API_KEY"):
                 logger.warning("Gemini fehlgeschlagen, Ausweichen auf Groq")
                 provider = "groq"
-                text = _groq(prompt, system)
+                text = _groq(prompt, system + (NO_SEARCH_NOTE if use_search else ""))
         elif provider == "groq":
-            text = _groq(prompt, system)
+            text = _groq(prompt, system + (NO_SEARCH_NOTE if use_search else ""))
         else:
             logger.warning("Unbekannter LLM_PROVIDER=%r, LLM uebersprungen", provider)
             return None
         if text is None:
             return None
+        _last_search_used = searched
         data = _extract_json(text)
         if data is None:
             logger.warning("LLM-Antwort ist kein gueltiges JSON-Objekt (provider=%s)", provider)
@@ -132,7 +155,14 @@ def _groq(prompt: str, system: str) -> Optional[str]:
         "temperature": 0.2,
         "response_format": {"type": "json_object"},
     }
-    data = _post("groq", GROQ_URL, headers={"Authorization": f"Bearer {key}"}, body=body)
+    headers = {"Authorization": f"Bearer {key}"}
+    data = _post("groq", GROQ_URL, headers=headers, body=body)
+    if data is None and _last_status == 404:
+        # Modell abgeschaltet -> verfuegbares Modell bei Groq erfragen und einmal neu versuchen
+        fallback = _groq_available_model(headers, exclude=model)
+        if fallback:
+            logger.warning("Groq-Modell %s nicht verfuegbar, nutze %s", model, fallback)
+            data = _post("groq", GROQ_URL, headers=headers, body={**body, "model": fallback})
     if data is None:
         return None
     try:
@@ -143,8 +173,27 @@ def _groq(prompt: str, system: str) -> Optional[str]:
     return content if isinstance(content, str) else None
 
 
+def _groq_available_model(headers: dict, exclude: str) -> Optional[str]:
+    """Waehlt aus Groqs Modellliste ein Chat-Modell (bevorzugte zuerst)."""
+    try:
+        resp = httpx.get(GROQ_MODELS_URL, headers=headers, timeout=TIMEOUT_S)
+        ids = [m.get("id") for m in resp.json().get("data", [])] if resp.status_code == 200 else []
+    except Exception as exc:  # Modellliste ist nur ein Rettungsversuch
+        logger.warning("Groq-Modellliste nicht abrufbar: %s", type(exc).__name__)
+        return None
+    ids = [i for i in ids if isinstance(i, str) and i != exclude
+           and not any(x in i.lower() for x in _GROQ_NON_CHAT)]
+    for preferred in GROQ_PREFERRED:
+        if preferred in ids:
+            return preferred
+    return sorted(ids)[0] if ids else None
+
+
 def _post(provider: str, url: str, *, headers: dict, body: dict) -> Optional[dict]:
-    """POST mit Timeout; gibt das geparste JSON-Objekt der Antwort oder None zurueck."""
+    """POST mit Timeout; gibt das geparste JSON-Objekt der Antwort oder None zurueck.
+    Der HTTP-Status landet in _last_status (None bei Netzwerkfehler/Timeout)."""
+    global _last_status
+    _last_status = None
     try:
         resp = httpx.post(url, headers=headers, json=body, timeout=TIMEOUT_S)
     except httpx.TimeoutException:
@@ -154,6 +203,7 @@ def _post(provider: str, url: str, *, headers: dict, body: dict) -> Optional[dic
         logger.warning("LLM-Netzwerkfehler (provider=%s): %s", provider, type(exc).__name__)
         return None
 
+    _last_status = resp.status_code
     if resp.status_code != 200:
         logger.warning("LLM-HTTP-Fehler %s (provider=%s)", resp.status_code, provider)
         return None

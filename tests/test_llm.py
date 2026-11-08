@@ -157,7 +157,7 @@ def test_groq_body_und_bearer(recorder, groq_key):
     body = kwargs["json"]
     assert body["model"] == "llama-3.3-70b-versatile"
     assert body["messages"] == [
-        {"role": "system", "content": "Sys"},
+        {"role": "system", "content": "Sys" + llm.NO_SEARCH_NOTE},  # Groq hat keine Websuche
         {"role": "user", "content": "Prompt"},
     ]
     assert body["temperature"] == 0.2
@@ -292,3 +292,53 @@ def test_gemini_fehler_weicht_auf_groq_aus(monkeypatch, gemini_key):
     monkeypatch.setattr(llm.httpx, "post", post)
     assert llm.complete_json("p", "s", use_search=True) == {"b": 2}
     assert sum("generativelanguage" in u for u in urls) == 2 and "groq" in urls[-1]
+
+
+def test_groq_404_waehlt_verfuegbares_modell(monkeypatch, groq_key):
+    """Echter Lauf: llama-3.3-70b-versatile -> 404. Modellliste abfragen, neu versuchen."""
+    bodies = []
+
+    def post(url, **kwargs):
+        bodies.append(kwargs["json"])
+        if kwargs["json"]["model"] == "llama-3.3-70b-versatile":
+            return httpx.Response(404, json={"error": {"code": "model_not_found"}})
+        return ok(groq_payload('{"c": 3}'))
+
+    def get(url, **kwargs):
+        assert url == llm.GROQ_MODELS_URL
+        return httpx.Response(200, json={"data": [{"id": "whisper-large-v3"},
+                                                  {"id": "openai/gpt-oss-120b"},
+                                                  {"id": "some-other-model"}]})
+
+    monkeypatch.setattr(llm.httpx, "post", post)
+    monkeypatch.setattr(llm.httpx, "get", get)
+    assert llm.complete_json("p", "s") == {"c": 3}
+    assert [b["model"] for b in bodies] == ["llama-3.3-70b-versatile", "openai/gpt-oss-120b"]
+
+
+def test_groq_404_ohne_modellliste_none(monkeypatch, groq_key):
+    monkeypatch.setattr(llm.httpx, "post", lambda url, **kw: httpx.Response(404, json={}))
+    monkeypatch.setattr(llm.httpx, "get", lambda url, **kw: httpx.Response(500, json={}))
+    assert llm.complete_json("p", "s") is None
+
+
+def test_fallback_ohne_suche_warnt_modell_und_meldet_keine_suche(monkeypatch, gemini_key):
+    systems = []
+
+    def post(url, **kwargs):
+        body = kwargs["json"]
+        systems.append(body["systemInstruction"]["parts"][0]["text"])
+        if "tools" in body:
+            return httpx.Response(429, json={})
+        return ok(gemini_payload('{"a": 1}'))
+
+    monkeypatch.setattr(llm.httpx, "post", post)
+    assert llm.complete_json("p", "SYS", use_search=True) == {"a": 1}
+    assert systems[0] == "SYS" and "KEINE Websuche" in systems[1]
+    assert llm.last_search_used() is False
+
+
+def test_mit_suche_erfolgreich_meldet_suche(recorder, gemini_key):
+    recorder.response = ok(gemini_payload('{"a": 1}'))
+    assert llm.complete_json("p", "s", use_search=True) == {"a": 1}
+    assert llm.last_search_used() is True

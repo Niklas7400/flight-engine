@@ -133,3 +133,13 @@ def test_prompt_contains_facts(monkeypatch):
     assert p.count('"preis_eur"') == 30 + 1 + 0 or p.count('"datum"') == 30
     assert '"preis_eur": 439.0' in p and '"preis_eur": 409.0' not in p
     assert "JSON" in seen["system"]
+
+
+def test_hinweis_ohne_websuche(run, monkeypatch):
+    monkeypatch.setattr(llm_advisor, "last_search_used", lambda: False)
+    assert any("Ohne Websuche" in r for r in run(good()).reasons)
+
+
+def test_kein_hinweis_mit_websuche(run, monkeypatch):
+    monkeypatch.setattr(llm_advisor, "last_search_used", lambda: True)
+    assert not any("Ohne Websuche" in r for r in run(good()).reasons)
