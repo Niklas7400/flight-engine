@@ -35,6 +35,18 @@ _FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL | re.IGNORECASE)
 
 # Grounding-URLs des letzten Gemini-Calls (nur gefuellt, wenn use_search=True).
 _last_sources: list[str] = []
+_last_search_used = False
+
+NO_SEARCH_NOTE = (
+    "\nWICHTIG: Fuer diese Antwort steht KEINE Websuche zur Verfuegung. Behaupte nichts ueber "
+    "aktuelle Flugplaene, Streiks oder Ereignisse. Stuetze dich auf die uebergebenen Fakten und "
+    "allgemein bekanntes Wissen (z. B. dass Osterferien die Nachfrage erhoehen)."
+)
+
+
+def last_search_used() -> bool:
+    """True, wenn die letzte erfolgreiche Antwort mit Websuche erstellt wurde."""
+    return _last_search_used
 
 
 def last_sources() -> list[str]:
@@ -48,30 +60,34 @@ def complete_json(prompt: str, system: str, use_search: bool = False) -> Optiona
     Gibt None zurueck bei: Provider "none", fehlendem Key, HTTP-/Netzwerkfehler,
     Timeout, ungueltigem JSON oder JSON, das kein Objekt ist.
     """
-    global _last_sources
+    global _last_sources, _last_search_used
     _last_sources = []
+    _last_search_used = False
     provider = (os.getenv("LLM_PROVIDER") or "gemini").strip().lower()
+    searched = False
     try:
         if provider == "none":
             return None
         if provider == "gemini":
             text = _gemini(prompt, system, use_search)
+            searched = use_search and text is not None
             if text is None and use_search:
                 # Websuche (Grounding) hat im kostenlosen Kontingent eigene, engere Limits
                 # (HTTP 429) -> einmal ohne Suche versuchen.
                 logger.warning("Gemini mit Websuche fehlgeschlagen, neuer Versuch ohne Suche")
-                text = _gemini(prompt, system, False)
+                text = _gemini(prompt, system + NO_SEARCH_NOTE, False)
             if text is None and os.getenv("GROQ_API_KEY"):
                 logger.warning("Gemini fehlgeschlagen, Ausweichen auf Groq")
                 provider = "groq"
-                text = _groq(prompt, system)
+                text = _groq(prompt, system + (NO_SEARCH_NOTE if use_search else ""))
         elif provider == "groq":
-            text = _groq(prompt, system)
+            text = _groq(prompt, system + (NO_SEARCH_NOTE if use_search else ""))
         else:
             logger.warning("Unbekannter LLM_PROVIDER=%r, LLM uebersprungen", provider)
             return None
         if text is None:
             return None
+        _last_search_used = searched
         data = _extract_json(text)
         if data is None:
             logger.warning("LLM-Antwort ist kein gueltiges JSON-Objekt (provider=%s)", provider)
