@@ -292,3 +292,31 @@ def test_gemini_fehler_weicht_auf_groq_aus(monkeypatch, gemini_key):
     monkeypatch.setattr(llm.httpx, "post", post)
     assert llm.complete_json("p", "s", use_search=True) == {"b": 2}
     assert sum("generativelanguage" in u for u in urls) == 2 and "groq" in urls[-1]
+
+
+def test_groq_404_waehlt_verfuegbares_modell(monkeypatch, groq_key):
+    """Echter Lauf: llama-3.3-70b-versatile -> 404. Modellliste abfragen, neu versuchen."""
+    bodies = []
+
+    def post(url, **kwargs):
+        bodies.append(kwargs["json"])
+        if kwargs["json"]["model"] == "llama-3.3-70b-versatile":
+            return httpx.Response(404, json={"error": {"code": "model_not_found"}})
+        return ok(groq_payload('{"c": 3}'))
+
+    def get(url, **kwargs):
+        assert url == llm.GROQ_MODELS_URL
+        return httpx.Response(200, json={"data": [{"id": "whisper-large-v3"},
+                                                  {"id": "openai/gpt-oss-120b"},
+                                                  {"id": "some-other-model"}]})
+
+    monkeypatch.setattr(llm.httpx, "post", post)
+    monkeypatch.setattr(llm.httpx, "get", get)
+    assert llm.complete_json("p", "s") == {"c": 3}
+    assert [b["model"] for b in bodies] == ["llama-3.3-70b-versatile", "openai/gpt-oss-120b"]
+
+
+def test_groq_404_ohne_modellliste_none(monkeypatch, groq_key):
+    monkeypatch.setattr(llm.httpx, "post", lambda url, **kw: httpx.Response(404, json={}))
+    monkeypatch.setattr(llm.httpx, "get", lambda url, **kw: httpx.Response(500, json={}))
+    assert llm.complete_json("p", "s") is None

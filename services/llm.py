@@ -23,6 +23,13 @@ GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 # Alias auf das aktuelle Flash-Modell, damit ein abgeschaltetes Modell nicht zu 404 fuehrt
 DEFAULT_GEMINI_MODEL = "gemini-flash-latest"
 DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
+GROQ_MODELS_URL = "https://api.groq.com/openai/v1/models"
+# Bevorzugte Modelle, falls das konfigurierte abgeschaltet ist (Reihenfolge = Vorrang).
+GROQ_PREFERRED = ("openai/gpt-oss-120b", "llama-3.3-70b-versatile", "openai/gpt-oss-20b")
+# Keine Chat-Modelle (Audio, Sprachausgabe, Moderation)
+_GROQ_NON_CHAT = ("whisper", "tts", "guard", "playai", "orpheus", "distil")
+
+_last_status: Optional[int] = None
 
 _FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL | re.IGNORECASE)
 
@@ -132,7 +139,14 @@ def _groq(prompt: str, system: str) -> Optional[str]:
         "temperature": 0.2,
         "response_format": {"type": "json_object"},
     }
-    data = _post("groq", GROQ_URL, headers={"Authorization": f"Bearer {key}"}, body=body)
+    headers = {"Authorization": f"Bearer {key}"}
+    data = _post("groq", GROQ_URL, headers=headers, body=body)
+    if data is None and _last_status == 404:
+        # Modell abgeschaltet -> verfuegbares Modell bei Groq erfragen und einmal neu versuchen
+        fallback = _groq_available_model(headers, exclude=model)
+        if fallback:
+            logger.warning("Groq-Modell %s nicht verfuegbar, nutze %s", model, fallback)
+            data = _post("groq", GROQ_URL, headers=headers, body={**body, "model": fallback})
     if data is None:
         return None
     try:
@@ -143,8 +157,27 @@ def _groq(prompt: str, system: str) -> Optional[str]:
     return content if isinstance(content, str) else None
 
 
+def _groq_available_model(headers: dict, exclude: str) -> Optional[str]:
+    """Waehlt aus Groqs Modellliste ein Chat-Modell (bevorzugte zuerst)."""
+    try:
+        resp = httpx.get(GROQ_MODELS_URL, headers=headers, timeout=TIMEOUT_S)
+        ids = [m.get("id") for m in resp.json().get("data", [])] if resp.status_code == 200 else []
+    except Exception as exc:  # Modellliste ist nur ein Rettungsversuch
+        logger.warning("Groq-Modellliste nicht abrufbar: %s", type(exc).__name__)
+        return None
+    ids = [i for i in ids if isinstance(i, str) and i != exclude
+           and not any(x in i.lower() for x in _GROQ_NON_CHAT)]
+    for preferred in GROQ_PREFERRED:
+        if preferred in ids:
+            return preferred
+    return sorted(ids)[0] if ids else None
+
+
 def _post(provider: str, url: str, *, headers: dict, body: dict) -> Optional[dict]:
-    """POST mit Timeout; gibt das geparste JSON-Objekt der Antwort oder None zurueck."""
+    """POST mit Timeout; gibt das geparste JSON-Objekt der Antwort oder None zurueck.
+    Der HTTP-Status landet in _last_status (None bei Netzwerkfehler/Timeout)."""
+    global _last_status
+    _last_status = None
     try:
         resp = httpx.post(url, headers=headers, json=body, timeout=TIMEOUT_S)
     except httpx.TimeoutException:
@@ -154,6 +187,7 @@ def _post(provider: str, url: str, *, headers: dict, body: dict) -> Optional[dic
         logger.warning("LLM-Netzwerkfehler (provider=%s): %s", provider, type(exc).__name__)
         return None
 
+    _last_status = resp.status_code
     if resp.status_code != 200:
         logger.warning("LLM-HTTP-Fehler %s (provider=%s)", resp.status_code, provider)
         return None
