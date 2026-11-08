@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "./supabase";
+import AskAI from "./AskAI";
 import type { Leg, Recommendation, TimingAdvice, Trip, TripOption } from "./types";
 import { actionLabel, dateOf, dateTime, duration, eur, googleFlightsUrl, routeOf, stopsLabel, timeOf } from "./format";
 
@@ -143,6 +144,7 @@ export default function Overview({ trip }: { trip: Trip }) {
                 <ul className="alts">{rec.alternatives.map((o) => <OptionCompact key={o.key} o={o} />)}</ul>
               </section>
             )}
+            <AskAI profile={trip.profile} rec={rec} />
             <footer className="muted foot">
               Stand: {dateTime(rec.created_at)}
               {rec.api_calls_remaining_month != null && <> · Verbleibende API-Calls im Monat: {rec.api_calls_remaining_month}</>}
