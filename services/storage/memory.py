@@ -35,11 +35,26 @@ class MemoryStorage:
         now = self._now()
         trip = self._trips.get(name)
         if trip is None:
-            trip = {"id": str(uuid.uuid4()), "name": name, "created_at": now}
+            trip = {"id": str(uuid.uuid4()), "name": name, "created_at": now,
+                    "tracking_enabled": True}
             self._trips[name] = trip
         trip["profile"] = profile
         trip["updated_at"] = now
         return trip["id"]
+
+    def list_trips(self, tracking_only: bool = False) -> list[dict]:
+        rows = [
+            {
+                "id": t["id"],
+                "name": t["name"],
+                "profile": t["profile"],
+                "tracking_enabled": t.get("tracking_enabled", True),
+            }
+            for t in self._trips.values()
+        ]
+        if tracking_only:
+            rows = [r for r in rows if r["tracking_enabled"]]
+        return sorted(rows, key=lambda r: r["name"])
 
     # --- Beobachtungen ---------------------------------------------------
     def add_observations(

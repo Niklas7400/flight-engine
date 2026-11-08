@@ -59,6 +59,15 @@ class SupabaseStorage:
         )
         return data[0]["id"]
 
+    def list_trips(self, tracking_only: bool = False) -> list[dict]:
+        def build(a, b):
+            q = self._db.table("trips").select("id,name,profile,tracking_enabled")
+            if tracking_only:
+                q = q.eq("tracking_enabled", True)
+            return q.order("name").range(a, b)
+
+        return self._fetch_all(build)
+
     # --- Beobachtungen ---------------------------------------------------
     def add_observations(
         self, trip_id: str, options: list[TripOption], observed_at: datetime

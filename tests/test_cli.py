@@ -204,3 +204,100 @@ def test_invalid_yaml_profile_gives_exit_4(storage, engine, tmp_path):
     bad.write_text("name: x\norigins: [FRA]\n", encoding="utf-8")  # Pflichtfelder fehlen
     assert cli.main(["run", str(bad)]) == 4
     assert engine.calls == []
+
+
+# --- track-all ----------------------------------------------------------------
+
+def _add_trip(storage, name, enabled=True):
+    d = profile_to_dict(_profile())
+    d["name"] = name
+    storage.upsert_trip(name, d)
+    storage._trips[name]["tracking_enabled"] = enabled
+
+
+def _run_all(args=(), today=date(2026, 11, 8)):
+    return cli._execute_all(cli._parser().parse_args(["track-all", *args]), today=today)
+
+
+def test_track_all_only_enabled_trips_with_split_budget(storage, engine):
+    _add_trip(storage, "a")
+    _add_trip(storage, "b")
+    _add_trip(storage, "off", enabled=False)
+    _used(storage, 75)
+    assert _run_all() == 0
+    # Nov 8: 22 Tage -> 22//3+1 = 8 Laeufe; (250-75-20)//8 = 19; je Trip 19//2 = 9
+    assert [c[:2] for c in engine.calls] == [("track", 9), ("track", 9)]
+
+
+def test_track_all_budget_uses_cli_cap(storage, engine):
+    _add_trip(storage, "a")
+    assert _run_all(["--budget", "6"]) == 0
+    assert engine.calls[0][1] == 6
+
+
+def test_track_all_last_day_of_month_gets_everything(storage, engine):
+    _add_trip(storage, "a")
+    _used(storage, 100)
+    # 30.11.: runs_left 1; remaining 130; min(30, 130) = 30
+    assert _run_all(today=date(2026, 11, 30)) == 0
+    assert engine.calls[0][1] == 30
+
+
+def test_track_all_skips_when_per_trip_budget_below_3(storage, engine, capsys):
+    _add_trip(storage, "a")
+    _used(storage, 225)
+    assert _run_all() == 0
+    assert engine.calls == []
+    assert "keine Suche" in capsys.readouterr().err
+
+
+def test_track_all_no_active_trips_exit_0(storage, engine):
+    _add_trip(storage, "off", enabled=False)
+    assert _run_all() == 0
+    assert engine.calls == []
+
+
+def test_track_all_skips_invalid_profile(storage, engine):
+    _add_trip(storage, "a")
+    storage.upsert_trip("bad", {"name": "bad"})
+    assert _run_all() == 0
+    assert len(engine.calls) == 1
+
+
+def test_track_all_error_in_one_trip_does_not_stop_others(storage, monkeypatch):
+    _add_trip(storage, "a")
+    _add_trip(storage, "b")
+    seen = []
+
+    def track(profile, storage_, budget, today=None, llm_timing_fn=None):
+        seen.append(profile.name)
+        if profile.name == "a":
+            raise NoFlightsError("leer")
+        return _recommendation()
+
+    mod = types.ModuleType("services.engine")
+    mod.track_trip = track
+    monkeypatch.setitem(sys.modules, "services.engine", mod)
+    assert _run_all() == 0
+    assert seen == ["a", "b"]
+
+
+def test_track_all_all_fail_exit_1_and_missing_key_exit_2(storage, monkeypatch):
+    _add_trip(storage, "a")
+    for err, code in ((NoFlightsError("x"), 1), (MissingApiKeyError("x"), 2)):
+        mod = types.ModuleType("services.engine")
+        mod.track_trip = FakeEngine(error=err).track_trip
+        monkeypatch.setitem(sys.modules, "services.engine", mod)
+        assert _run_all() == code
+
+
+def test_track_all_via_main(storage, engine):
+    _add_trip(storage, "a")
+    assert cli.main(["track-all", "--no-llm"]) == 0
+    assert engine.calls[0][2] is None
+
+
+def test_run_without_yaml_with_trip_from_db(storage, engine):
+    _add_trip(storage, "kapverden_2027")
+    assert cli.main(["run", "--trip-from-db", "kapverden_2027"]) == 0
+    assert engine.calls[0][0] == "run"

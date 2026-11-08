@@ -14,6 +14,10 @@ class Storage(Protocol):
 
     def upsert_trip(self, name: str, profile: dict) -> str: ...
 
+    def list_trips(self, tracking_only: bool = False) -> list[dict]:
+        """Alle Trips (id, name, profile, tracking_enabled), nach name sortiert."""
+        ...
+
     def add_observations(
         self, trip_id: str, options: list[TripOption], observed_at: datetime
     ) -> None: ...

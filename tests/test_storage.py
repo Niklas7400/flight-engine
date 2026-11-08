@@ -177,3 +177,33 @@ def test_supabase_upsert_trip_and_cache_ttl():
     assert s.cache_get("k") == {"v": 1}
     s2 = SupabaseStorage(client=client, now=lambda: now + timedelta(hours=7))
     assert s2.cache_get("k") is None
+
+
+def test_list_trips_sorted_and_tracking_only():
+    s = MemoryStorage()
+    s.upsert_trip("b", {"n": 1})
+    s.upsert_trip("a", {"n": 2})
+    s._trips["b"]["tracking_enabled"] = False
+    assert [t["name"] for t in s.list_trips()] == ["a", "b"]
+    assert [t["name"] for t in s.list_trips(tracking_only=True)] == ["a"]
+    assert set(s.list_trips()[0]) == {"id", "name", "profile", "tracking_enabled"}
+
+
+def test_upsert_keeps_tracking_enabled():
+    s = MemoryStorage()
+    assert s.list_trips()[:1] == []
+    s.upsert_trip("x", {"n": 1})
+    assert s.get_trip("x")["tracking_enabled"] is True
+    s._trips["x"]["tracking_enabled"] = False
+    s.upsert_trip("x", {"n": 2})
+    assert s.list_trips()[0]["tracking_enabled"] is False
+    assert s.list_trips()[0]["profile"] == {"n": 2}
+
+
+def test_supabase_list_trips_filters_and_orders():
+    rows = [{"id": "1", "name": "a", "profile": {}, "tracking_enabled": True}]
+    client = FakeClient({"trips": FakeResp(rows)})
+    s = SupabaseStorage(client=client)
+    assert s.list_trips(tracking_only=True) == rows
+    calls = [c[0] for c in client.queries[-1].calls]
+    assert "eq" in calls and "order" in calls

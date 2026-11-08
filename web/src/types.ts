@@ -67,6 +67,7 @@ export interface Trip {
   id: string;
   name: string;
   profile: Profile;
+  tracking_enabled: boolean;
 }
 export interface Observation {
   option_key: string;

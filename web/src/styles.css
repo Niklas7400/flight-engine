@@ -73,3 +73,13 @@ textarea.prompt { width: 100%; box-sizing: border-box; margin-top: 8px; font: 0.
 
 .leg-line { display: flex; gap: 8px; margin-top: 4px; font-size: .95em; line-height: 1.4; }
 .leg-label { flex: 0 0 2.6em; color: var(--muted); }
+
+button.ghost.danger { color: var(--err); border-color: var(--err); }
+.picker { display: flex; gap: 8px; align-items: flex-end; }
+.picker .field { margin-bottom: 0; }
+.picker button { flex: 0 0 auto; }
+.tracking { display: flex; flex-direction: column; gap: 4px; }
+.tracking .pref { padding: 0; }
+
+@media (max-width: 520px) { .tracking .pref { flex-direction: column; align-items: stretch; } }
+.stack > .field { flex: 0 0 auto; }
