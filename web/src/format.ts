@@ -18,6 +18,9 @@ export const dateTime = (iso: string): string =>
 export const actionLabel = (a: Action): string =>
   a === "BUY_NOW" ? "Jetzt buchen" : a === "WAIT" ? "Warten" : "Weiter beobachten";
 
+export const confidenceLabel = (c: string): string =>
+  ({ low: "gering", medium: "mittel", high: "hoch" } as Record<string, string>)[c] ?? c;
+
 export const stopsLabel = (n: number): string => (n === 0 ? "direkt" : n === 1 ? "1 Umstieg" : `${n} Umstiege`);
 
 export const routeOf = (l: Leg): string => l.route.join(" → ");

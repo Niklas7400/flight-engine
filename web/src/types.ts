@@ -25,6 +25,7 @@ export interface TimingAdvice {
   decide_by: string | null;
   target_price: number | null;
   confidence: string;
+  basis?: string | null;
   reasons: string[];
   source: string;
 }

@@ -154,7 +154,25 @@ def test_decide_by_reached_buys():
     prices = [500, 505, 500, 495, 500, 502, 498, 500]
     adv = advise(make_best(dep, 500), make_series(prices), None, TODAY, False)
     assert adv.action == BookingAction.BUY_NOW
-    assert adv.decide_by == TODAY
+    assert adv.decide_by is None  # "jetzt buchen" zeigt keine Frist
+    assert any("Entscheidungsfrist" in r for r in adv.reasons)
+
+
+def test_buy_now_never_has_deadline_and_basis_explains_confidence():
+    """Echter Fall: Preis weit unter Googles Spanne -> BUY_NOW ohne 'entscheiden bis'."""
+    dep = date(2027, 4, 4)
+    ins = PriceInsights(typical_low=700, typical_high=1300)
+    series = make_series([439, 404, 404, 369, 369, 369])
+    adv = advise(make_best(dep, 369), series, ins, date(2026, 11, 8), True)
+    assert adv.action == BookingAction.BUY_NOW
+    assert adv.decide_by is None
+    assert adv.basis == "6 Preispunkte, Google-Preisspanne"
+
+
+def test_basis_without_range():
+    adv = advise(make_best(date(2027, 9, 15)), make_series([500]), None, TODAY, False)
+    assert adv.basis == "1 Preispunkt, keine Google-Preisspanne"
+    assert adv.decide_by is not None  # WATCH/WAIT behalten die Frist
 
 
 def test_decide_by_holiday():

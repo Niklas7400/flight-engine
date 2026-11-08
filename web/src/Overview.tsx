@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "./supabase";
 import AskAI from "./AskAI";
 import type { Leg, Recommendation, TimingAdvice, Trip, TripOption } from "./types";
-import { actionLabel, dateOf, dateTime, duration, eur, googleFlightsUrl, routeOf, stopsLabel, timeOf } from "./format";
+import { actionLabel, confidenceLabel, dateOf, dateTime, duration, eur, googleFlightsUrl, routeOf, stopsLabel, timeOf } from "./format";
 
 function LegRow({ label, leg }: { label: string; leg: Leg }) {
   return (
@@ -22,9 +22,16 @@ function Advice({ title, advice, extra }: { title: string; advice: TimingAdvice;
       <p className="big">{actionLabel(advice.action)}</p>
       {extra && <p className="warn">{extra}</p>}
       <dl className="facts">
-        {advice.decide_by && (<><dt>Entscheiden bis</dt><dd>{dateOf(advice.decide_by)}</dd></>)}
+        {/* Frist nur, wenn nicht "jetzt buchen" (auch fuer aeltere gespeicherte Empfehlungen) */}
+        {advice.decide_by && advice.action !== "BUY_NOW" && (
+          <><dt>Spätestens buchen bis</dt><dd>{dateOf(advice.decide_by)}</dd></>
+        )}
         {advice.target_price != null && (<><dt>Zielpreis</dt><dd>{eur(advice.target_price)}</dd></>)}
-        <dt>Sicherheit</dt><dd>{advice.confidence}</dd>
+        {advice.source === "llm" ? (
+          <><dt>Selbsteinschätzung der KI</dt><dd>{confidenceLabel(advice.confidence)} <span className="muted">(nicht überprüfbar)</span></dd></>
+        ) : (
+          <><dt>Datengrundlage</dt><dd>{confidenceLabel(advice.confidence)}{advice.basis ? <span className="muted"> ({advice.basis})</span> : null}</dd></>
+        )}
       </dl>
       <ul>{advice.reasons.map((r, i) => <li key={i}>{r}</li>)}</ul>
     </section>
