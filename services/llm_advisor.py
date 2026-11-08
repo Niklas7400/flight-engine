@@ -32,7 +32,7 @@ SYSTEM_PROMPT = (
     "1. Erfinde keine Preise. Nenne in deiner Antwort nur Preise, die in den "
     "uebergebenen Fakten stehen (gemessene Preise) oder deinen eigenen Zielpreis.\n"
     "2. Recherchiere per Websuche nur Kontext, der in den Zahlen fehlt (Ferien, "
-    "Flugplanaenderungen, Preisentwicklung bei Charterfluegen), und nenne dafuer keine "
+    "Flugplanaenderungen, saisonale Preisentwicklung), und nenne dafuer keine "
     "Preise aus dem Web.\n"
     "3. Wenn du unsicher bist, sage das ausdruecklich und setze confidence auf low.\n"
     "4. Antworte NUR als JSON-Objekt ohne weiteren Text im Format: "
@@ -122,11 +122,16 @@ def _build_prompt(best: TripOption, series: list[PricePoint],
         "Gemessene Fakten zu einer Flugreise (JSON):\n"
         + json.dumps(facts, ensure_ascii=False, indent=1)
         + "\n\nAuftrag: Recherchiere per Websuche Kontext, der in den Zahlen fehlt: "
-        "Schulferien in Hessen und den Nachbarlaendern 2027 im Reisezeitraum, "
-        "Flugplanaenderungen von Condor, TUI, TAP und Binter auf Kapverden-Strecken, "
-        "bekannte Preisentwicklung bei Charterfluegen in Ferienzeiten. "
+        f"Schulferien und Feiertage im Reisezeitraum (Abflugland: {best.outbound.origin}), "
+        f"Flugplanaenderungen auf der Strecke {best.outbound.origin}–{best.outbound.destination} "
+        f"(Airlines: {', '.join(_airlines(best)) or 'unbekannt'}), "
+        "saisonale Preisentwicklung auf dieser Strecke. "
         "Gib dann deine eigene Empfehlung ab (nur JSON laut System-Vorgabe)."
     )
+
+
+def _airlines(option: TripOption) -> list[str]:
+    return list(dict.fromkeys(option.outbound.airlines + option.inbound.airlines))
 
 
 def _validate(data: Any, best: TripOption, series: list[PricePoint],

@@ -57,14 +57,14 @@ export function buildPrompt(profile: Profile, rec: Recommendation): string {
     lines.push(`Zweite KI-Einschätzung: ${actionLabel(rec.timing_llm.action)}`,
       ...rec.timing_llm.reasons.map((r) => `- ${r}`));
   }
-  lines.push(
-    "",
-    "## Meine Fragen",
-    "1. Jetzt buchen oder warten? Falls warten: bis wann und ab welchem Preis zuschlagen?",
-    "2. Was kosten die Direktflüge ohne Preis bei Google (z. B. TUI) aktuell beim Anbieter?",
-    "3. Gibt es bessere Alternativen, die mein Tool nicht sieht (andere Abflughäfen in der Nähe, andere Airlines, Pauschalangebote)?",
-    "4. Worauf sollte ich bei der Buchung achten (Gepäck, Umsteigezeit, getrennte Tickets, Inselwechsel)?",
-  );
+  // Fragen gelten fuer jede Strecke; die Frage zu Fluegen ohne Preis nur, wenn es welche gibt
+  const questions = [
+    "Jetzt buchen oder warten? Falls warten: bis wann und ab welchem Preis zuschlagen?",
+    ...(rec.hints?.length ? ["Was kosten die oben genannten Flüge ohne Preis bei Google aktuell bei der Airline?"] : []),
+    "Gibt es bessere Alternativen, die mein Tool nicht sieht (andere Abflughäfen in der Nähe, andere Airlines, Pauschalangebote)?",
+    "Worauf sollte ich bei der Buchung achten (Gepäck, Umsteigezeiten, getrennte Tickets)?",
+  ];
+  lines.push("", "## Meine Fragen", ...questions.map((q, i) => `${i + 1}. ${q}`));
   return lines.join("\n");
 }
 

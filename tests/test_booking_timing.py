@@ -162,7 +162,8 @@ def test_decide_by_holiday():
     assert is_holiday_period(dep)
     adv = advise(make_best(dep), [], None, date(2026, 11, 8), True)
     assert adv.decide_by == date(2027, 1, 5)
-    assert any("Osterferien" in r and "Charter-Kontingente" in r for r in adv.reasons)
+    assert any("Osterferien" in r and "Nachfrage" in r for r in adv.reasons)
+    assert not any("Charter" in r for r in adv.reasons)  # gilt fuer jede Strecke
 
 
 def test_decide_by_normal():
