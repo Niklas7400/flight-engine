@@ -18,6 +18,7 @@ export interface TripOption {
   penalties: Record<string, number>;
   nights: number;
   key: string;
+  stale_days?: number; // Alter der Preisdaten in Tagen (0/fehlt = in diesem Lauf frisch)
 }
 export type Action = "BUY_NOW" | "WAIT" | "WATCH";
 export interface TimingAdvice {
