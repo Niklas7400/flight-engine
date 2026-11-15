@@ -114,7 +114,9 @@ def _evaluate(profile: TripProfile, storage, options: list[TripOption],
 
     trip_id = storage.upsert_trip(profile.name, profile_to_dict(profile))
     now = datetime.now()
-    storage.add_observations(trip_id, options[:TOP_OBSERVATIONS], now)
+    # veraltete Preise nicht mit heutigem Zeitstempel als neue Beobachtung speichern
+    fresh = [o for o in options if o.stale_days == 0]
+    storage.add_observations(trip_id, fresh[:TOP_OBSERVATIONS], now)
     # Preisreihe genau dieser Option (gleiche Tage + Flughaefen); erst bei zu wenig
     # Punkten auf das Tagesminimum aller Optionen ausweichen.
     series = storage.get_price_series(trip_id, best.key)

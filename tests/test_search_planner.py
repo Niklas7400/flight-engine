@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
@@ -6,7 +6,7 @@ import services.search_planner as sp
 from services.flight_api import MissingApiKeyError
 from services.storage.memory import MemoryStorage
 from services.trip_profile import load_profile
-from tests.helpers_flights import FakeApi, fake_utility, leg
+from tests.helpers_flights import Clock, FakeApi, fake_utility, leg
 from services.models import OneWayOffer, TripOption
 
 TODAY = date(2026, 11, 8)
@@ -21,9 +21,7 @@ def profile():
 def setup(monkeypatch):
     storage = MemoryStorage()
     api = FakeApi(storage)
-    monkeypatch.setattr(sp, "search_oneway", api.oneway)
-    monkeypatch.setattr(sp, "search_roundtrip", api.roundtrip)
-    monkeypatch.setattr(sp, "apply_utility", fake_utility)
+    api.patch(monkeypatch, sp)
     return storage, api
 
 
@@ -70,9 +68,7 @@ def test_tight_budget_spreads_window(profile, setup):
 def test_skips_failing_days(profile, monkeypatch):
     storage = MemoryStorage()
     api = FakeApi(storage, fail_days=[date(2027, 3, 20)])
-    monkeypatch.setattr(sp, "search_oneway", api.oneway)
-    monkeypatch.setattr(sp, "search_roundtrip", api.roundtrip)
-    monkeypatch.setattr(sp, "apply_utility", fake_utility)
+    api.patch(monkeypatch, sp)
     options, insights = sp.plan_and_search(profile, storage, 100, TODAY)
     assert ("out", date(2027, 3, 20)) not in insights
     assert options
@@ -108,24 +104,135 @@ def test_combine_limits_top5():
     assert len(sp._combine(out, ret, False)) == 25
 
 
+def _key(od, rd, o="FRA", d="SID"):
+    return TripOption(leg(o, d, od), leg(d, o, rd), 1, "x").key
+
+
+def _clock_setup(monkeypatch, start=None):
+    clock = Clock(start or datetime(2026, 11, 8, 12, tzinfo=timezone.utc))
+    storage = MemoryStorage(now=clock)
+    api = FakeApi(storage)
+    api.patch(monkeypatch, sp)
+    return clock, storage, api
+
+
 def test_track_with_keys(profile, setup):
     storage, api = setup
-    key = TripOption(leg("FRA", "SID", date(2027, 3, 20)), leg("SID", "FRA", date(2027, 3, 30)),
-                     1, "x").key
-    key2 = TripOption(leg("FRA", "SID", date(2027, 3, 20)), leg("SID", "FRA", date(2027, 4, 1)),
-                      1, "x").key
-    res = sp.track(profile, storage, [key, key2, key], 20, TODAY)
-    assert sorted(o.key for o in res) == sorted([key, key2])
-    # dedupliziert: 1 Hinflugtag + 2 Rueckflugtage
-    assert len(api.oneway_days) == 3
-    # + Roundtrip-Abfrage der ersten (besten) Option, damit Googles Preisniveau aktuell bleibt
-    assert api.roundtrips == [(date(2027, 3, 20), date(2027, 3, 30))]
-    assert storage.api_calls_this_month("serpapi") == 3 + 2
+    key = _key(date(2027, 3, 20), date(2027, 3, 30))
+    key2 = _key(date(2027, 3, 20), date(2027, 4, 1))
+    res = sp.track(profile, storage, [key, key2, key, "kaputt"], 20, TODAY)
+    # alle Optionen des Fensters (nicht nur die Keys), volle Flughaefen des Profils
+    assert {key, key2} <= {o.key for o in res} and len(res) > 2
+    assert all(o[0] in (("FRA",), ("BVC", "RAI", "SID")) or len(o[0]) == 3 for o in api.oneway_days)
+    assert ("FRA",) in {o[0] for o in api.oneway_days}
+    # bekannt: 1 Hin- + 2 Rueckflugtage (<= ceil(20/2)); Erkundung bis auf 2 Calls Reserve
+    first_days = [d for _, d in api.oneway_days[:3]]
+    assert first_days[0] == date(2027, 3, 20) and set(first_days) == {
+        date(2027, 3, 20), date(2027, 3, 30), date(2027, 4, 1)}
+    assert len(api.oneway_days) == 18
+    # Roundtrip-Abfrage der besten Option
+    assert len(api.roundtrips) == 1
+    assert storage.api_calls_this_month("serpapi") == 18 + 2
 
 
 def test_track_budget(profile, setup):
     storage, _ = setup
-    key = TripOption(leg("FRA", "SID", date(2027, 3, 20)), leg("SID", "FRA", date(2027, 3, 30)),
-                     1, "x").key
+    key = _key(date(2027, 3, 20), date(2027, 3, 30))
     sp.track(profile, storage, [key], 1, TODAY)
     assert storage.api_calls_this_month("serpapi") == 1
+
+
+def test_track_ignores_keys_outside_window_and_past(profile, setup):
+    storage, api = setup
+    keys = [_key(date(2027, 1, 5), date(2027, 1, 15)), _key(date(2026, 11, 1), date(2027, 3, 30))]
+    sp.track(profile, storage, keys, 4, TODAY)
+    # nur der Rueckflugtag 30.3. liegt im Fenster und ist bekannt -> zuerst abgefragt
+    assert api.oneway_days[0] == (("SID", "BVC", "RAI"), date(2027, 3, 30))
+
+
+def test_track_discovers_cheaper_unknown_day_via_exploration(profile, monkeypatch):
+    clock, storage, api = _clock_setup(monkeypatch)
+    api.delta = {date(2027, 3, 18): -90, date(2027, 3, 26): -90}   # frueheste Tage, nicht in den Keys
+    key = _key(date(2027, 3, 20), date(2027, 3, 30))
+    res = sp.track(profile, storage, [key], 12, TODAY)
+    best = res[0]
+    assert (best.outbound.departure.date(), best.inbound.departure.date()) == (
+        date(2027, 3, 18), date(2027, 3, 26))
+    assert best.key != key and best.stale_days == 0
+
+
+def test_track_discovers_cheaper_day_from_cache(profile, monkeypatch):
+    clock, storage, api = _clock_setup(monkeypatch)
+    api.delta = {date(2027, 4, 2): -90, date(2027, 4, 11): -90}
+    sp.plan_and_search(profile, storage, 100, TODAY)         # frueherer Lauf (volle Suche)
+    clock.t += timedelta(days=2)                              # Cache laenger als 12h alt
+    api.oneway_days.clear()
+    key = _key(date(2027, 3, 20), date(2027, 3, 30))
+    res = sp.track(profile, storage, [key], 1, TODAY, now=clock.t)
+    assert len(api.oneway_days) == 1                          # nur der bekannte Hinflugtag
+    best = res[0]
+    assert (best.outbound.departure.date(), best.inbound.departure.date()) == (
+        date(2027, 4, 2), date(2027, 4, 11))
+    assert best.stale_days == 2
+
+
+@pytest.mark.parametrize("budget", [0, 1, 2, 5, 6, 9, 20, 60])
+def test_track_budget_never_exceeded(profile, setup, budget):
+    storage, _ = setup
+    keys = [_key(date(2027, 3, 20 + i), date(2027, 3, 30 + i % 2)) for i in range(5)]
+    sp.track(profile, storage, keys, budget, TODAY)
+    assert storage.api_calls_this_month("serpapi") <= budget
+
+
+def test_track_budget_9_split(profile, setup):
+    storage, api = setup
+    keys = [_key(date(2027, 3, 20 + i), date(2027, 3, 30) + timedelta(days=i)) for i in range(5)]
+    sp.track(profile, storage, keys, 9, TODAY)
+    # 5 bekannte Tage (ceil(9/2)) + 2 Erkundung + 2 Roundtrip (Reserve)
+    known = {date(2027, 3, 20 + i) for i in range(5)} | {date(2027, 3, 30) + timedelta(days=i) for i in range(5)}
+    assert all(d in known for _, d in api.oneway_days[:5])
+    assert len(api.oneway_days) == 7 and len(api.roundtrips) == 1
+    assert storage.api_calls_this_month("serpapi") == 9
+
+
+def test_track_staleness_rotation_covers_window(profile, monkeypatch):
+    clock, storage, api = _clock_setup(monkeypatch)
+    key = _key(date(2027, 3, 20), date(2027, 3, 30))
+    window = {("out", d) for d in sp.outbound_days(profile, TODAY)} | \
+             {("ret", d) for d in sp.return_days(profile, TODAY)}
+    seen, runs = set(), 0
+    while seen != window and runs < 30:
+        runs += 1
+        clock.t += timedelta(days=1)
+        api.oneway_days.clear()
+        sp.track(profile, storage, [key], 9, TODAY, now=clock.t)
+        seen |= {("out" if o == ("FRA",) else "ret", d) for o, d in api.oneway_days}
+    assert seen == window
+    assert runs <= 12   # 44 Tage; je Lauf 2 bekannt + 5 Erkundung + 2 Auffrischung der besten Option
+
+
+def test_stale_best_is_refreshed(profile, monkeypatch):
+    clock, storage, api = _clock_setup(monkeypatch)
+    api.delta = {date(2027, 4, 2): -90, date(2027, 4, 11): -90}
+    sp.plan_and_search(profile, storage, 100, TODAY)
+    clock.t += timedelta(days=2)
+    api.oneway_days.clear()
+    key = _key(date(2027, 3, 20), date(2027, 3, 30))
+    # 6 = 2 bekannt + 2 Erkundung (Mar 18/26) + 2 fuer die veraltete beste Option
+    res = sp.track(profile, storage, [key], 6, TODAY, now=clock.t)
+    queried = {d for _, d in api.oneway_days}
+    assert {date(2027, 4, 2), date(2027, 4, 11)} <= queried
+    assert res[0].stale_days == 0
+    assert (res[0].outbound.departure.date(), res[0].inbound.departure.date()) == (
+        date(2027, 4, 2), date(2027, 4, 11))
+    assert storage.api_calls_this_month("serpapi") - 60 <= 6
+
+
+def test_cache_older_than_21_days_ignored(profile, monkeypatch):
+    clock, storage, api = _clock_setup(monkeypatch)
+    sp.plan_and_search(profile, storage, 100, TODAY)
+    clock.t += timedelta(days=22)
+    assert sp.track(profile, storage, [], 0, TODAY, now=clock.t) == []
+    clock.t -= timedelta(days=2)    # 20 Tage alt -> nutzbar
+    res = sp.track(profile, storage, [], 0, TODAY, now=clock.t)
+    assert res and all(o.stale_days == 20 for o in res)

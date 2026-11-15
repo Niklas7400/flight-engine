@@ -182,3 +182,35 @@ class SupabaseStorage:
             {"key": key, "value": value, "fetched_at": self._now().isoformat()},
             on_conflict="key",
         ).execute()
+
+    def cache_get_stale(self, key: str, max_age_seconds: float) -> Optional[tuple[dict, datetime]]:
+        data = (
+            self._db.table("search_cache")
+            .select("value,fetched_at")
+            .eq("key", key)
+            .limit(1)
+            .execute()
+            .data
+        )
+        if not data:
+            return None
+        fetched_at = _parse_ts(data[0]["fetched_at"])
+        if self._now() - fetched_at > timedelta(seconds=max_age_seconds):
+            return None
+        return data[0]["value"], fetched_at
+
+    def cache_fetched_at_many(self, keys: list[str]) -> dict[str, datetime]:
+        if not keys:
+            return {}
+        result: dict[str, datetime] = {}
+        for i in range(0, len(keys), 100):  # in_-Filter in der URL: Chunks
+            data = (
+                self._db.table("search_cache")
+                .select("key,fetched_at")
+                .in_("key", keys[i:i + 100])
+                .execute()
+                .data
+            )
+            for row in data or []:
+                result[row["key"]] = _parse_ts(row["fetched_at"])
+        return result

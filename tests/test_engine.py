@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
@@ -8,7 +8,7 @@ from services.flight_api import NoFlightsError
 from services.models import TimingAdvice
 from services.storage.memory import MemoryStorage
 from services.trip_profile import load_profile
-from tests.helpers_flights import FakeApi, fake_utility
+from tests.helpers_flights import Clock, FakeApi, fake_utility
 
 TODAY = date(2026, 11, 8)
 
@@ -22,9 +22,7 @@ def profile():
 def setup(monkeypatch):
     storage = MemoryStorage()
     api = FakeApi(storage)
-    monkeypatch.setattr(sp, "search_oneway", api.oneway)
-    monkeypatch.setattr(sp, "search_roundtrip", api.roundtrip)
-    monkeypatch.setattr(sp, "apply_utility", fake_utility)
+    api.patch(monkeypatch, sp)
     monkeypatch.setattr(engine, "explain_choice", lambda b, c, wanted_nights=None: "erklaert")
     return storage, api
 
@@ -97,3 +95,23 @@ def test_google_history_merges_with_timezone_aware_db_series():
     assert [p.price for p in merged][-1] == 369.0
     assert len(merged) == 3
     assert all(p.observed_at.tzinfo is None for p in merged)
+
+
+def test_stale_options_not_stored_as_observations(profile, monkeypatch):
+    clock = Clock(datetime.now(timezone.utc) - timedelta(days=3))
+    storage = MemoryStorage(now=clock)
+    api = FakeApi(storage)
+    api.patch(monkeypatch, sp)
+    monkeypatch.setattr(engine, "explain_choice", lambda b, c, wanted_nights=None: "x")
+    engine.run_trip(profile, storage, 100, TODAY)
+    n_before = len(storage._observations)
+    clock.t = datetime.now(timezone.utc)
+    # Budget 0: alles aus dem Cache -> alle Optionen veraltet -> keine neuen Beobachtungen
+    rec = engine.track_trip(profile, storage, 0, TODAY)
+    assert rec.best.stale_days >= 2
+    assert len(storage._observations) == n_before
+    # mit Budget wird die beste Option frisch abgefragt und beobachtet
+    rec = engine.track_trip(profile, storage, 6, TODAY)
+    assert rec.best.stale_days == 0
+    assert len(storage._observations) > n_before
+    assert all(o["price"] for o in storage._observations)
