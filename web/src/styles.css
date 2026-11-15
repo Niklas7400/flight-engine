@@ -83,3 +83,4 @@ button.ghost.danger { color: var(--err); border-color: var(--err); }
 
 @media (max-width: 520px) { .tracking .pref { flex-direction: column; align-items: stretch; } }
 .stack > .field { flex: 0 0 auto; }
+.stale { color: var(--warn, #b26a00); }

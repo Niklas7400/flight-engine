@@ -126,13 +126,19 @@ function LegLine({ label, leg }: { label: string; leg: Leg }) {
   );
 }
 
+/** Hinweis, wenn der Preis aus einem früheren Lauf stammt. */
+function Stale({ o }: { o: TripOption }) {
+  if (!o.stale_days) return null;
+  return <span className="stale"> · Preisstand vor {o.stale_days} {o.stale_days === 1 ? "Tag" : "Tagen"}</span>;
+}
+
 function OptionCompact({ o, bestPrice }: { o: TripOption; bestPrice: number }) {
   const diff = o.price - bestPrice;
   return (
     <li className="alt">
       <div>
         <strong>{eur(o.price)}</strong>
-        <span className="muted"> · {o.nights} Nächte{diff !== 0 ? ` · ${diff > 0 ? "+" : "−"}${eur(Math.abs(diff))} ggü. bestem Flug` : " · gleicher Preis"}</span>
+        <span className="muted"> · {o.nights} Nächte{diff !== 0 ? ` · ${diff > 0 ? "+" : "−"}${eur(Math.abs(diff))} ggü. bestem Flug` : " · gleicher Preis"}<Stale o={o} /></span>
       </div>
       <LegLine label="Hin" leg={o.outbound} />
       <LegLine label="Rück" leg={o.inbound} />
@@ -186,7 +192,7 @@ export default function Overview({ trip, onChanged }: { trip: Trip; onChanged: (
             )}
             <section className="card">
               <h2>Bester Flug</h2>
-              <p className="big">{eur(best.price)} <span className="muted">· {best.nights} Nächte</span></p>
+              <p className="big">{eur(best.price)} <span className="muted">· {best.nights} Nächte<Stale o={best} /></span></p>
               <LegRow label="Hin" leg={best.outbound} />
               <LegRow label="Rück" leg={best.inbound} />
               <p>{rec.explanation}</p>
@@ -196,7 +202,7 @@ export default function Overview({ trip, onChanged }: { trip: Trip; onChanged: (
               <section className="card small">
                 <h3>Günstigste Option</h3>
                 <p>
-                  {eur(rec.cheapest.price)} ({diff > 0 ? `${eur(diff)} günstiger` : `${eur(-diff)} teurer`}) · {rec.cheapest.nights} Nächte
+                  {eur(rec.cheapest.price)} ({diff > 0 ? `${eur(diff)} günstiger` : `${eur(-diff)} teurer`}) · {rec.cheapest.nights} Nächte<Stale o={rec.cheapest} />
                 </p>
                 <LegLine label="Hin" leg={rec.cheapest.outbound} />
                 <LegLine label="Rück" leg={rec.cheapest.inbound} />

@@ -95,6 +95,7 @@ class TripOption:
     price: float                      # Gesamtpreis 1 Person
     source: str                       # "oneway_combo" | "roundtrip"
     booking_tokens: list[str] = field(default_factory=list)
+    stale_days: int = 0               # Alter der aeltesten Preisdaten in Tagen; 0 = frisch abgefragt
     # vom Utility-Scoring befuellt:
     effective_cost: Optional[float] = None
     penalties: dict[str, float] = field(default_factory=dict)  # key -> EUR

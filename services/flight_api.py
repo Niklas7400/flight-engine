@@ -372,6 +372,10 @@ def _base_params(origins, destinations, out_day: date, trip_type: int) -> dict:
     api_key = os.getenv("SERPAPI_KEY")
     if not api_key:
         raise MissingApiKeyError("SERPAPI_KEY is not set")
+    return _params_for(origins, destinations, out_day, trip_type, api_key)
+
+
+def _params_for(origins, destinations, out_day: date, trip_type: int, api_key: str) -> dict:
     return {
         "engine": "google_flights",
         "departure_id": ",".join(origins),
@@ -386,12 +390,21 @@ def _base_params(origins, destinations, out_day: date, trip_type: int) -> dict:
     }
 
 
+def _cache_key(params: dict) -> str:
+    return json.dumps({k: v for k, v in params.items() if k != "api_key"}, sort_keys=True)
+
+
+def oneway_cache_key(origins, destinations, day: date) -> str:
+    """Cache-Key eines One-Way-Calls (identisch zu search_oneway), ohne API-Key."""
+    return _cache_key(_params_for(origins, destinations, day, 2, "x"))
+
+
 def _call_serpapi(params: dict, storage, kind: str):
     """Ein SerpApi-Call mit Cache. Gibt (results, from_cache) zurueck.
 
     kind: "oneway" | "roundtrip" | "return_leg". Nur echte Calls werden gezaehlt.
     """
-    key = json.dumps({k: v for k, v in params.items() if k != "api_key"}, sort_keys=True)
+    key = _cache_key(params)
     cached = storage.cache_get(key)
     if cached is not None:
         return cached, True
@@ -422,6 +435,20 @@ def search_oneway(origins: list, destinations: list, day: date, storage) -> Sear
     """Einweg-Suche fuer einen Tag, alle Flughaefen in EINEM Call (type=2)."""
     params = _base_params(origins, destinations, day, 2)
     results, from_cache = _call_serpapi(params, storage, "oneway")
+    return _parse_oneway(results, from_cache)
+
+
+def cached_oneway(origins: list, destinations: list, day: date, storage,
+                  max_age_seconds: float) -> Optional[tuple[SearchResult, datetime]]:
+    """Gecachte One-Way-Antwort (auch ueber die TTL hinaus) + fetched_at; KEIN API-Call."""
+    hit = storage.cache_get_stale(oneway_cache_key(origins, destinations, day), max_age_seconds)
+    if hit is None:
+        return None
+    results, fetched_at = hit
+    return _parse_oneway(results, True), fetched_at
+
+
+def _parse_oneway(results: dict, from_cache: bool) -> SearchResult:
     offers, unpriced = [], []
     for item in _all_flights(results):
         price = _parse_price(item.get("price"))

@@ -207,3 +207,39 @@ def test_supabase_list_trips_filters_and_orders():
     assert s.list_trips(tracking_only=True) == rows
     calls = [c[0] for c in client.queries[-1].calls]
     assert "eq" in calls and "order" in calls
+
+
+def test_cache_get_stale_and_fetched_at_many_memory():
+    clock = Clock(datetime(2026, 11, 8, 12, tzinfo=UTC))
+    s = MemoryStorage(now=clock)
+    t0 = clock.t
+    s.cache_set("a", {"v": 1})
+    clock.t += timedelta(hours=1)
+    s.cache_set("b", {"v": 2})
+    clock.t += timedelta(days=2)
+    assert s.cache_get("a") is None                       # TTL abgelaufen ...
+    assert s.cache_get_stale("a", 21 * 86400) == ({"v": 1}, t0)   # ... aber stale nutzbar
+    assert s.cache_get_stale("a", 86400) is None            # aelter als max_age
+    assert s.cache_get_stale("zzz", 86400) is None
+    assert s.cache_fetched_at_many(["a", "b", "zzz"]) == {"a": t0, "b": t0 + timedelta(hours=1)}
+    assert s.cache_fetched_at_many([]) == {}
+
+
+def test_supabase_cache_get_stale_and_fetched_at_many():
+    client = FakeClient({
+        "search_cache": FakeResp([{"key": "k", "value": {"v": 1},
+                                   "fetched_at": "2026-11-01T00:00:00+00:00"},
+                                  {"key": "k2", "value": {"v": 2},
+                                   "fetched_at": "2026-11-05T00:00:00Z"}]),
+    })
+    now = datetime(2026, 11, 8, tzinfo=UTC)
+    s = SupabaseStorage(client=client, now=lambda: now)
+    assert s.cache_get("k") is None                        # > 12h
+    val, at = s.cache_get_stale("k", 21 * 86400)
+    assert val == {"v": 1} and at == datetime(2026, 11, 1, tzinfo=UTC)
+    assert s.cache_get_stale("k", 3 * 86400) is None
+    got = s.cache_fetched_at_many(["k", "k2", "gibtsnicht"])
+    assert got == {"k": datetime(2026, 11, 1, tzinfo=UTC), "k2": datetime(2026, 11, 5, tzinfo=UTC)}
+    calls = dict((c[0], c[1]) for c in client.queries[-1].calls)
+    assert calls["in_"] == ("key", ["k", "k2", "gibtsnicht"])      # ein Select mit in_-Filter
+    assert s.cache_fetched_at_many([]) == {}

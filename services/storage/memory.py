@@ -137,9 +137,20 @@ class MemoryStorage:
             return None
         fetched_at, value = entry
         if self._now() - fetched_at > timedelta(seconds=CACHE_TTL_SECONDS):
-            del self._cache[key]
             return None
         return value
+
+    def cache_get_stale(self, key: str, max_age_seconds: float) -> Optional[tuple[dict, datetime]]:
+        entry = self._cache.get(key)
+        if entry is None:
+            return None
+        fetched_at, value = entry
+        if self._now() - fetched_at > timedelta(seconds=max_age_seconds):
+            return None
+        return value, fetched_at
+
+    def cache_fetched_at_many(self, keys: list[str]) -> dict[str, datetime]:
+        return {k: self._cache[k][0] for k in keys if k in self._cache}
 
     def cache_set(self, key: str, value: dict) -> None:
         self._cache[key] = (self._now(), value)
