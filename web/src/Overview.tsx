@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "./supabase";
 import AskAI from "./AskAI";
 import type { Leg, Recommendation, TimingAdvice, Trip, TripOption } from "./types";
-import { actionLabel, confidenceLabel, dateOf, dateTime, duration, eur, googleFlightsUrl, routeOf, stopsLabel, timeOf } from "./format";
+import { actionLabel, asOf, confidenceLabel, dateOf, dateTime, duration, eur, googleFlightsUrl, routeOf, stopsLabel, timeOf } from "./format";
 
 function LegRow({ label, leg }: { label: string; leg: Leg }) {
   return (
@@ -193,6 +193,15 @@ export default function Overview({ trip, onChanged }: { trip: Trip; onChanged: (
             <section className="card">
               <h2>Bester Flug</h2>
               <p className="big">{eur(best.price)} <span className="muted">· {best.nights} Nächte<Stale o={best} /></span></p>
+              {(() => {
+                const a = asOf(rec.created_at);
+                return (
+                  <p className={a.days >= 1 ? "warn small-note" : "muted small-note"}>
+                    {a.label}
+                    {a.days >= 1 && " · Preise können sich seitdem geändert haben. „Preise aktualisieren“ holt den aktuellen Stand."}
+                  </p>
+                );
+              })()}
               <LegRow label="Hin" leg={best.outbound} />
               <LegRow label="Rück" leg={best.inbound} />
               <p>{rec.explanation}</p>

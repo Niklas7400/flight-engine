@@ -12,6 +12,16 @@ export const dateOf = (iso: string): string => {
   return d.toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", year: "numeric" });
 };
 
+/** "Stand 13.11. (vor 2 Tagen)" bzw. "(heute)" / "(gestern)"; days = volle Kalendertage. */
+export function asOf(iso: string, now: Date = new Date()): { label: string; days: number } {
+  const d = new Date(iso);
+  const day = (x: Date) => Date.UTC(x.getFullYear(), x.getMonth(), x.getDate());
+  const days = Math.max(0, Math.round((day(now) - day(d)) / 86_400_000));
+  const date = d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" });
+  const rel = days === 0 ? "heute" : days === 1 ? "gestern" : `vor ${days} Tagen`;
+  return { label: `Stand ${date} (${rel})`, days };
+}
+
 export const dateTime = (iso: string): string =>
   new Date(iso).toLocaleString("de-DE", { dateStyle: "medium", timeStyle: "short" });
 
